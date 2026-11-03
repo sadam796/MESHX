@@ -84,6 +84,9 @@ private fun MeshxHome() {
     var identity by remember { mutableStateOf<MeshxIdentity?>(null) }
     var importText by remember { mutableStateOf("") }
     var contacts by remember { mutableStateOf(prefs.getStringSet("contacts", emptySet())?.toList() ?: emptyList()) }
+    var contactPublicKeys by remember {
+        mutableStateOf(prefs.getStringSet("contact_public_keys", emptySet())?.toSet() ?: emptySet())
+    }
     var status by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     val qrImagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -163,8 +166,14 @@ private fun MeshxHome() {
                         val id = fingerprint(keyBytes)
                         require(identity?.fingerprint != id) { "This is your own identity." }
                         val updated = (contacts + id).distinct()
-                        prefs.edit().putStringSet("contacts", updated.toSet()).apply()
+                        val publicIdentity = "MESHX1:" + Base64.encodeToString(keyBytes, Base64.NO_WRAP)
+                        val updatedKeys = contactPublicKeys + publicIdentity
+                        prefs.edit()
+                            .putStringSet("contacts", updated.toSet())
+                            .putStringSet("contact_public_keys", updatedKeys)
+                            .apply()
                         contacts = updated
+                        contactPublicKeys = updatedKeys
                         importText = ""
                         status = "Contact added: $id"
                         error = null
@@ -189,7 +198,7 @@ private fun MeshxHome() {
                 Text("Messaging engine — in development", style = MaterialTheme.typography.titleMedium)
                 Text("Global Internet peer discovery, end-to-end encrypted delivery, media transfer, and nearby Bluetooth / Wi-Fi messaging are not connected yet.")
                 Spacer(Modifier.height(12.dp))
-                Text("Prototype only: contacts currently store public-key fingerprints on this device. Live camera scanning, recovery phrase, encrypted backup and messaging transport are still to be built.", style = MaterialTheme.typography.bodySmall)
+                Text("Contact public keys and fingerprints are stored locally for future secure session setup. No message is sent yet. Recovery phrase, encrypted backup and messaging transport are still to be built.", style = MaterialTheme.typography.bodySmall)
             }
         }
     }
