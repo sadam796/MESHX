@@ -7,36 +7,27 @@ import android.util.Base64
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
+import java.security.KeyFactory
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.spec.ECGenParameterSpec
+import java.security.spec.X509EncodedKeySpec
 
 private const val IDENTITY_ALIAS = "meshx_identity_v1"
+private const val PREFS_NAME = "meshx_local_contacts"
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -45,126 +36,133 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private data class MeshxIdentity(
-    val fingerprint: String,
-    val qrPayload: String
-)
+private data class MeshxIdentity(val fingerprint: String, val qrPayload: String)
+
+private fun fingerprint(publicKey: ByteArray): String {
+    val digest = MessageDigest.getInstance("SHA-256").digest(publicKey)
+    return digest.take(8).joinToString("") { "%02X".format(it) }.chunked(4).joinToString("-")
+}
 
 private fun loadOrCreateIdentity(): MeshxIdentity {
     val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-
     if (!keyStore.containsAlias(IDENTITY_ALIAS)) {
-        val generator = KeyPairGenerator.getInstance(
-            KeyProperties.KEY_ALGORITHM_EC,
-            "AndroidKeyStore"
-        )
-        generator.initialize(
-            KeyGenParameterSpec.Builder(
-                IDENTITY_ALIAS,
-                KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY
-            )
-                .setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
-                .setDigests(KeyProperties.DIGEST_SHA256)
-                .build()
-        )
+        val generator = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore")
+        generator.initialize(KeyGenParameterSpec.Builder(
+            IDENTITY_ALIAS,
+            KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY
+        ).setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
+            .setDigests(KeyProperties.DIGEST_SHA256).build())
         generator.generateKeyPair()
     }
-
     val publicKey = keyStore.getCertificate(IDENTITY_ALIAS).publicKey.encoded
-    val digest = MessageDigest.getInstance("SHA-256").digest(publicKey)
-    val fingerprint = digest.take(8).joinToString("") { "%02X".format(it) }
-        .chunked(4).joinToString("-")
-    val encodedKey = Base64.encodeToString(publicKey, Base64.NO_WRAP)
-    return MeshxIdentity(fingerprint, "MESHX1:$encodedKey")
+    return MeshxIdentity(
+        fingerprint(publicKey),
+        "MESHX1:" + Base64.encodeToString(publicKey, Base64.NO_WRAP)
+    )
 }
 
 private fun makeQrBitmap(payload: String): android.graphics.Bitmap {
     val matrix = QRCodeWriter().encode(payload, BarcodeFormat.QR_CODE, 640, 640)
     val bitmap = android.graphics.Bitmap.createBitmap(640, 640, android.graphics.Bitmap.Config.ARGB_8888)
-    for (x in 0 until 640) {
-        for (y in 0 until 640) {
-            bitmap.setPixel(x, y, if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
-        }
+    for (x in 0 until 640) for (y in 0 until 640) {
+        bitmap.setPixel(x, y, if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
     }
     return bitmap
 }
 
-@androidx.compose.runtime.Composable
+@Composable
 private fun MeshxHome() {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE) }
     var identity by remember { mutableStateOf<MeshxIdentity?>(null) }
+    var importText by remember { mutableStateOf("") }
+    var contacts by remember { mutableStateOf(prefs.getStringSet("contacts", emptySet())?.toList() ?: emptyList()) }
+    var status by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
 
     MaterialTheme {
-        Surface(modifier = Modifier.fillMaxSize()) {
+        Surface(Modifier.fillMaxSize()) {
             Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Top
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Spacer(modifier = Modifier.height(28.dp))
+                Spacer(Modifier.height(24.dp))
                 Text("MESHX", style = MaterialTheme.typography.headlineLarge)
-                Text("Global private messaging", modifier = Modifier.padding(top = 8.dp))
-                Spacer(modifier = Modifier.height(28.dp))
-
+                Text("Global private messaging")
+                Spacer(Modifier.height(24.dp))
                 Text("Your digital identity", style = MaterialTheme.typography.titleLarge)
-                Text(
-                    "Create an identity without a phone number or email. Your private key stays inside Android Keystore on this phone.",
-                    modifier = Modifier.padding(top = 10.dp)
-                )
-                Spacer(modifier = Modifier.height(18.dp))
-
+                Text("No phone number or email required. Your private key stays in Android Keystore on this device.")
                 Button(onClick = {
                     try {
                         identity = loadOrCreateIdentity()
                         error = null
                     } catch (e: Exception) {
-                        error = e.localizedMessage ?: "Could not create identity."
+                        error = e.localizedMessage ?: "Identity could not be created."
                     }
-                }) {
-                    Text(if (identity == null) "Create / Load my identity" else "Refresh my identity")
-                }
+                }) { Text(if (identity == null) "Create / Load my identity" else "Refresh my identity") }
 
-                error?.let {
-                    Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 12.dp))
-                }
-
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 identity?.let { current ->
-                    Spacer(modifier = Modifier.height(20.dp))
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(
-                            modifier = Modifier.padding(18.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
+                    Card(Modifier.fillMaxWidth().padding(top = 12.dp)) {
+                        Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             Text("MESHX ID", style = MaterialTheme.typography.titleMedium)
                             Text(current.fingerprint, style = MaterialTheme.typography.headlineSmall)
-                            Spacer(modifier = Modifier.height(12.dp))
                             Image(
                                 bitmap = makeQrBitmap(current.qrPayload).asImageBitmap(),
-                                contentDescription = "MESHX public identity QR code",
+                                contentDescription = "Public identity QR code",
                                 modifier = Modifier.height(220.dp)
                             )
-                            Text(
-                                "This QR contains your public identity only. Never share your recovery phrase or private key.",
-                                modifier = Modifier.padding(top = 12.dp)
-                            )
+                            Text("QR mein sirf public key hai. Private key kabhi share na karein.")
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(Modifier.height(24.dp))
+                Text("Add a contact", style = MaterialTheme.typography.titleLarge)
+                Text("Doosre user ka MESHX QR scan karke uska MESHX1: text yahan paste karein. Camera scanner baad mein add hoga.")
+                OutlinedTextField(
+                    value = importText,
+                    onValueChange = { importText = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Paste public identity") },
+                    minLines = 2
+                )
+                Button(onClick = {
+                    try {
+                        val raw = importText.trim()
+                        require(raw.startsWith("MESHX1:")) { "MESHX1 public identity required." }
+                        val keyBytes = Base64.decode(raw.removePrefix("MESHX1:"), Base64.DEFAULT)
+                        KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(keyBytes))
+                        val id = fingerprint(keyBytes)
+                        require(identity?.fingerprint != id) { "This is your own identity." }
+                        val updated = (contacts + id).distinct()
+                        prefs.edit().putStringSet("contacts", updated.toSet()).apply()
+                        contacts = updated
+                        importText = ""
+                        status = "Contact added: $id"
+                        error = null
+                    } catch (e: Exception) {
+                        error = e.localizedMessage ?: "Invalid public identity."
+                        status = null
+                    }
+                }) { Text("Add contact") }
+                status?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+
+                Spacer(Modifier.height(16.dp))
+                Text("Saved contacts (" + contacts.size + ")", style = MaterialTheme.typography.titleMedium)
+                if (contacts.isEmpty()) Text("Abhi koi contact nahi hai.")
+                contacts.forEach { contact ->
+                    Card(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                        Text(contact, Modifier.padding(14.dp))
+                    }
+                }
+
+                Spacer(Modifier.height(24.dp))
                 Text("Messaging engine — in development", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "Internet peer discovery, encrypted message delivery, media transfer, and nearby Bluetooth / Wi-Fi messaging are not connected yet.",
-                    modifier = Modifier.padding(top = 8.dp)
-                )
-                Spacer(modifier = Modifier.height(24.dp))
-                Text(
-                    "Prototype notice: this identity is stored on this device and is not yet recoverable on another phone. Recovery phrase and encrypted backup will be added before real-world use.",
-                    style = MaterialTheme.typography.bodySmall
-                )
+                Text("Global Internet peer discovery, end-to-end encrypted delivery, media transfer, and nearby Bluetooth / Wi-Fi messaging are not connected yet.")
+                Spacer(Modifier.height(12.dp))
+                Text("Prototype only: contacts currently store public-key fingerprints on this device. Recovery phrase, encrypted backup, QR camera scanning and messaging transport are still to be built.", style = MaterialTheme.typography.bodySmall)
             }
         }
     }
