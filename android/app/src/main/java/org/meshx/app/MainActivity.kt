@@ -94,7 +94,7 @@ private fun MeshxHome() {
             try {
                 val bitmap = context.contentResolver.openInputStream(uri)?.use {
                     BitmapFactory.decodeStream(it)
-                } ?: error("Image could not be opened.")
+                } ?: throw IllegalStateException("Image could not be opened.")
                 val pixels = IntArray(bitmap.width * bitmap.height)
                 bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
                 val source = RGBLuminanceSource(bitmap.width, bitmap.height, pixels)
