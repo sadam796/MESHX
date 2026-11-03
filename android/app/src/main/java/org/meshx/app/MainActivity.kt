@@ -32,9 +32,74 @@ import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.spec.ECGenParameterSpec
 import java.security.spec.X509EncodedKeySpec
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 
 private const val IDENTITY_ALIAS = "meshx_identity_v1"
 private const val PREFS_NAME = "meshx_local_contacts"
+
+private const val MESSAGE_KEY_ALIAS = "meshx_local_messages_aes_v1"
+
+private fun getOrCreateMessageKey(): SecretKey {
+    val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+    val existing = store.getKey(MESSAGE_KEY_ALIAS, null) as? SecretKey
+    if (existing != null) return existing
+    val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+    generator.init(
+        KeyGenParameterSpec.Builder(
+            MESSAGE_KEY_ALIAS,
+            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+        ).setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+            .setRandomizedEncryptionRequired(true)
+            .build()
+    )
+    return generator.generateKey()
+}
+
+private fun encryptLocalRecord(value: String): String {
+    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+    cipher.init(Cipher.ENCRYPT_MODE, getOrCreateMessageKey())
+    val encrypted = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
+    val combined = cipher.iv + encrypted
+    return "ENC1:" + Base64.encodeToString(combined, Base64.NO_WRAP)
+}
+
+private fun decryptLocalRecord(value: String): String {
+    require(value.startsWith("ENC1:")) { "Legacy record" }
+    val combined = Base64.decode(value.removePrefix("ENC1:"), Base64.DEFAULT)
+    require(combined.size > 12) { "Encrypted record is incomplete" }
+    val iv = combined.copyOfRange(0, 12)
+    val encrypted = combined.copyOfRange(12, combined.size)
+    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+    cipher.init(Cipher.DECRYPT_MODE, getOrCreateMessageKey(), GCMParameterSpec(128, iv))
+    return String(cipher.doFinal(encrypted), Charsets.UTF_8)
+}
+
+private fun loadLocalMessages(prefs: android.content.SharedPreferences): Set<String> {
+    val stored = prefs.getStringSet("local_messages", emptySet())?.toSet() ?: emptySet()
+    val plaintext = linkedSetOf<String>()
+    val encrypted = linkedSetOf<String>()
+    stored.forEach { item ->
+        if (item.startsWith("ENC1:")) {
+            try {
+                val decoded = decryptLocalRecord(item)
+                plaintext.add(decoded)
+                encrypted.add(item)
+            } catch (_: Exception) {
+                // Skip records that cannot be authenticated or decrypted.
+            }
+        } else {
+            // One-time migration from the early local-only prototype format.
+            plaintext.add(item)
+            try { encrypted.add(encryptLocalRecord(item)) } catch (_: Exception) { }
+        }
+    }
+    if (encrypted != stored) prefs.edit().putStringSet("local_messages", encrypted).apply()
+    return plaintext
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -91,7 +156,7 @@ private fun MeshxHome() {
     var error by remember { mutableStateOf<String?>(null) }
     var selectedChat by remember { mutableStateOf<String?>(null) }
     var messageDraft by remember { mutableStateOf("") }
-    var localMessages by remember { mutableStateOf(prefs.getStringSet("local_messages", emptySet())?.toSet() ?: emptySet()) }
+    var localMessages by remember { mutableStateOf(loadLocalMessages(prefs)) }
     val qrImagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             try {
@@ -253,7 +318,8 @@ private fun MeshxHome() {
                                         val encoded = Base64.encodeToString(body.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
                                         val entry = "$chatId#${System.currentTimeMillis()}#$encoded"
                                         val updated = localMessages + entry
-                                        prefs.edit().putStringSet("local_messages", updated).apply()
+                                        val encryptedRecords = updated.map { encryptLocalRecord(it) }.toSet()
+                                        prefs.edit().putStringSet("local_messages", encryptedRecords).apply()
                                         localMessages = updated
                                         messageDraft = ""
                                     }
