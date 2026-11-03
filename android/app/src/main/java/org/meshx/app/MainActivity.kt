@@ -89,6 +89,9 @@ private fun MeshxHome() {
     }
     var status by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var selectedChat by remember { mutableStateOf<String?>(null) }
+    var messageDraft by remember { mutableStateOf("") }
+    var localMessages by remember { mutableStateOf(prefs.getStringSet("local_messages", emptySet())?.toSet() ?: emptySet()) }
     val qrImagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             try {
@@ -190,7 +193,74 @@ private fun MeshxHome() {
                 if (contacts.isEmpty()) Text("Abhi koi contact nahi hai.")
                 contacts.forEach { contact ->
                     Card(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                        Text(contact, Modifier.padding(14.dp))
+                        Row(
+                            Modifier.fillMaxWidth().padding(14.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(contact, modifier = Modifier.weight(1f))
+                            TextButton(onClick = {
+                                selectedChat = contact
+                                messageDraft = ""
+                            }) { Text("Open chat") }
+                        }
+                    }
+                }
+
+                selectedChat?.let { chatId ->
+                    Spacer(Modifier.height(16.dp))
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                            Text("Chat with $chatId", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "LOCAL PROTOTYPE — messages stay on this phone. They are not encrypted or delivered to the other person yet.",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Spacer(Modifier.height(12.dp))
+                            val chatEntries = localMessages.mapNotNull { entry ->
+                                val parts = entry.split("#", limit = 3)
+                                if (parts.size == 3 && parts[0] == chatId) {
+                                    try {
+                                        parts[1].toLong() to String(Base64.decode(parts[2], Base64.DEFAULT), Charsets.UTF_8)
+                                    } catch (_: Exception) { null }
+                                } else null
+                            }.sortedBy { it.first }
+                            if (chatEntries.isEmpty()) {
+                                Text("No local messages yet.")
+                            } else {
+                                chatEntries.forEach { (_, body) ->
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.secondaryContainer,
+                                        shape = MaterialTheme.shapes.medium,
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
+                                    ) {
+                                        Text(body, Modifier.padding(10.dp))
+                                    }
+                                }
+                            }
+                            OutlinedTextField(
+                                value = messageDraft,
+                                onValueChange = { messageDraft = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text("Write a local test message") },
+                                minLines = 2
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(onClick = {
+                                    val body = messageDraft.trim()
+                                    if (body.isNotEmpty()) {
+                                        val encoded = Base64.encodeToString(body.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+                                        val entry = "$chatId#${System.currentTimeMillis()}#$encoded"
+                                        val updated = localMessages + entry
+                                        prefs.edit().putStringSet("local_messages", updated).apply()
+                                        localMessages = updated
+                                        messageDraft = ""
+                                    }
+                                }, enabled = messageDraft.isNotBlank()) { Text("Save on this phone") }
+                                TextButton(onClick = { selectedChat = null }) { Text("Close") }
+                            }
+                        }
                     }
                 }
 
