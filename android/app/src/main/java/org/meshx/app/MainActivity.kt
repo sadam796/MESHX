@@ -1,11 +1,14 @@
 package org.meshx.app
 
 import android.os.Bundle
+import android.graphics.BitmapFactory
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -18,6 +21,10 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.google.zxing.BarcodeFormat
+import com.google.zxing.BinaryBitmap
+import com.google.zxing.MultiFormatReader
+import com.google.zxing.RGBLuminanceSource
+import com.google.zxing.common.HybridBinarizer
 import com.google.zxing.qrcode.QRCodeWriter
 import java.security.KeyFactory
 import java.security.KeyPairGenerator
@@ -79,6 +86,25 @@ private fun MeshxHome() {
     var contacts by remember { mutableStateOf(prefs.getStringSet("contacts", emptySet())?.toList() ?: emptyList()) }
     var status by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    val qrImagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            try {
+                val bitmap = context.contentResolver.openInputStream(uri)?.use {
+                    BitmapFactory.decodeStream(it)
+                } ?: error("Image could not be opened.")
+                val pixels = IntArray(bitmap.width * bitmap.height)
+                bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+                val source = RGBLuminanceSource(bitmap.width, bitmap.height, pixels)
+                val result = MultiFormatReader().decode(BinaryBitmap(HybridBinarizer(source)))
+                importText = result.text
+                status = "QR read ho gaya. Ab Add contact dabayein."
+                error = null
+            } catch (e: Exception) {
+                error = "Is image mein readable MESHX QR nahi mila."
+                status = null
+            }
+        }
+    }
 
     MaterialTheme {
         Surface(Modifier.fillMaxSize()) {
@@ -119,7 +145,8 @@ private fun MeshxHome() {
 
                 Spacer(Modifier.height(24.dp))
                 Text("Add a contact", style = MaterialTheme.typography.titleLarge)
-                Text("Doosre user ka MESHX QR scan karke uska MESHX1: text yahan paste karein. Camera scanner baad mein add hoga.")
+                Text("QR image gallery se select karein, ya public identity text paste karein.")
+                OutlinedButton(onClick = { qrImagePicker.launch("image/*") }) { Text("Import QR image from gallery") }
                 OutlinedTextField(
                     value = importText,
                     onValueChange = { importText = it },
@@ -162,7 +189,7 @@ private fun MeshxHome() {
                 Text("Messaging engine — in development", style = MaterialTheme.typography.titleMedium)
                 Text("Global Internet peer discovery, end-to-end encrypted delivery, media transfer, and nearby Bluetooth / Wi-Fi messaging are not connected yet.")
                 Spacer(Modifier.height(12.dp))
-                Text("Prototype only: contacts currently store public-key fingerprints on this device. Recovery phrase, encrypted backup, QR camera scanning and messaging transport are still to be built.", style = MaterialTheme.typography.bodySmall)
+                Text("Prototype only: contacts currently store public-key fingerprints on this device. Live camera scanning, recovery phrase, encrypted backup and messaging transport are still to be built.", style = MaterialTheme.typography.bodySmall)
             }
         }
     }
