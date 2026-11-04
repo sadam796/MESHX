@@ -1,5 +1,5 @@
 //! Local TCP application-protocol smoke test.
-//! This proves one peer can send an opaque byte payload and receive an acknowledgement.
+//! This exchanges a bounded delivery-envelope structure, not real MLS ciphertext.
 //! It does not provide E2E encryption, discovery, relays, durable delivery, or global reachability.
 
 use std::time::Duration;
@@ -10,14 +10,13 @@ use libp2p::{
     swarm::{NetworkBehaviour, Swarm, SwarmEvent},
     tcp, yamux, Multiaddr, StreamProtocol, SwarmBuilder,
 };
+use meshx_libp2p_transport_spike::{DeliveryAck, DeliveryEnvelope};
 
 const DELIVERY_PROTOCOL: &str = "/meshx/delivery/1";
-const TEST_CIPHERTEXT: &[u8] = b"opaque-test-ciphertext-not-real-encryption";
-const ACK: &[u8] = b"accepted-for-test-only";
 
 #[derive(NetworkBehaviour)]
 struct Behaviour {
-    delivery: request_response::cbor::Behaviour<Vec<u8>, Vec<u8>>,
+    delivery: request_response::cbor::Behaviour<DeliveryEnvelope, DeliveryAck>,
 }
 
 fn make_swarm() -> Swarm<Behaviour> {
@@ -43,10 +42,20 @@ fn make_swarm() -> Swarm<Behaviour> {
 }
 
 #[tokio::test]
-async fn two_local_peers_exchange_opaque_delivery_payload_and_ack() {
+async fn two_local_peers_exchange_delivery_envelope_and_ack() {
     let mut alice = make_swarm();
     let mut bob = make_swarm();
     let bob_peer = *bob.local_peer_id();
+    let outgoing = DeliveryEnvelope {
+        message_id: [42; 16],
+        sender_id: b"alice-protocol-id".to_vec(),
+        recipient_id: b"bob-protocol-id".to_vec(),
+        created_at: 100,
+        expires_at: 300,
+        hop_limit: 8,
+        ciphertext: b"opaque-test-bytes-not-real-encryption".to_vec(),
+    };
+    outgoing.validate(101).expect("valid test envelope");
 
     bob.listen_on("/ip4/127.0.0.1/tcp/0".parse().unwrap())
         .expect("Bob listens");
@@ -75,10 +84,7 @@ async fn two_local_peers_exchange_opaque_delivery_payload_and_ack() {
                 event = alice.select_next_some() => {
                     match event {
                         SwarmEvent::ConnectionEstablished { peer_id, .. } if peer_id == bob_peer && !request_sent => {
-                            alice.behaviour_mut().delivery.send_request(
-                                &bob_peer,
-                                TEST_CIPHERTEXT.to_vec(),
-                            );
+                            alice.behaviour_mut().delivery.send_request(&bob_peer, outgoing.clone());
                             request_sent = true;
                         }
                         SwarmEvent::Behaviour(BehaviourEvent::Delivery(
@@ -87,7 +93,8 @@ async fn two_local_peers_exchange_opaque_delivery_payload_and_ack() {
                                 ..
                             }
                         )) => {
-                            assert_eq!(response.as_slice(), ACK);
+                            assert_eq!(response.message_id, outgoing.message_id);
+                            assert!(response.accepted);
                             acknowledgement_received = true;
                         }
                         _ => {}
@@ -100,10 +107,13 @@ async fn two_local_peers_exchange_opaque_delivery_payload_and_ack() {
                             ..
                         }
                     )) = event {
-                        assert_eq!(request.as_slice(), TEST_CIPHERTEXT);
+                        assert_eq!(request, outgoing);
+                        request.validate(101).expect("Bob validates envelope");
                         payload_received = true;
-                        bob.behaviour_mut().delivery.send_response(channel, ACK.to_vec())
-                            .expect("send acknowledgement");
+                        bob.behaviour_mut().delivery.send_response(channel, DeliveryAck {
+                            message_id: request.message_id,
+                            accepted: true,
+                        }).expect("send acknowledgement");
                     }
                 }
             }
@@ -114,7 +124,7 @@ async fn two_local_peers_exchange_opaque_delivery_payload_and_ack() {
         }
     })
     .await
-    .expect("application payload exchange timed out");
+    .expect("application envelope exchange timed out");
 
     assert!(request_sent);
     assert!(payload_received);
