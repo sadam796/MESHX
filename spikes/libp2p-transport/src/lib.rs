@@ -24,6 +24,18 @@ pub struct DeliveryEnvelope {
 }
 
 impl DeliveryEnvelope {
+    /// Produces the envelope a relay may send to the next peer.
+    /// The message ID and ciphertext remain unchanged; only the hop budget decreases.
+    pub fn forward_one_hop(&self, now: u64) -> Result<Self, EnvelopeError> {
+        self.validate(now)?;
+        if self.hop_limit <= 1 {
+            return Err(EnvelopeError::HopLimitExhausted);
+        }
+        let mut forwarded = self.clone();
+        forwarded.hop_limit -= 1;
+        Ok(forwarded)
+    }
+
     pub fn validate(&self, now: u64) -> Result<(), EnvelopeError> {
         if self.sender_id.is_empty() || self.sender_id.len() > MAX_ID_BYTES
             || self.recipient_id.is_empty() || self.recipient_id.len() > MAX_ID_BYTES {
@@ -61,6 +73,7 @@ pub enum EnvelopeError {
     InvalidExpiry,
     Expired,
     QueueFull,
+    HopLimitExhausted,
 }
 
 /// Bounded in-memory queue for ciphertext envelopes. It is a testable prototype,
@@ -160,6 +173,25 @@ mod tests {
         let mut queue = MemoryQueue::new(4);
         assert_eq!(queue.enqueue(envelope(2, b"bob", 110), 110), Err(EnvelopeError::Expired));
         assert!(queue.is_empty());
+    }
+
+    #[test]
+    fn forwarding_decrements_hop_budget_without_changing_message_or_ciphertext() {
+        let mut original = envelope(10, b"bob", 500);
+        original.hop_limit = 2;
+        let forwarded = original.forward_one_hop(101).expect("first relay hop");
+        assert_eq!(forwarded.hop_limit, 1);
+        assert_eq!(forwarded.message_id, original.message_id);
+        assert_eq!(forwarded.ciphertext, original.ciphertext);
+        assert_eq!(original.hop_limit, 2, "forwarding must not mutate caller's copy");
+        assert_eq!(forwarded.forward_one_hop(102), Err(EnvelopeError::HopLimitExhausted));
+    }
+
+    #[test]
+    fn forwarding_rejects_expired_envelope() {
+        let mut original = envelope(11, b"bob", 110);
+        original.hop_limit = 3;
+        assert_eq!(original.forward_one_hop(110), Err(EnvelopeError::Expired));
     }
 
     #[test]
