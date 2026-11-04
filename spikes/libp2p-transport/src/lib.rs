@@ -91,6 +91,16 @@ pub fn start_dht_bootstrap(
     dht.bootstrap()
 }
 
+/// Queries the DHT for peers closest to a recipient's stable libp2p peer ID.
+/// A result is only a set of candidate network peers; it does not prove that
+/// the recipient is online or that a message has been delivered.
+pub fn find_closest_peers(
+    dht: &mut MeshxDht,
+    recipient_peer_id: libp2p::PeerId,
+) -> libp2p::kad::QueryId {
+    dht.get_closest_peers(recipient_peer_id)
+}
+
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_HOP_LIMIT: u8 = 16;
 pub const MAX_TTL_SECONDS: u64 = 7 * 24 * 60 * 60;
@@ -251,6 +261,15 @@ mod tests {
         }
     }
 
+
+    #[test]
+    fn dht_can_start_a_recipient_peer_lookup() {
+        let local = libp2p::identity::Keypair::generate_ed25519().public().to_peer_id();
+        let recipient = libp2p::identity::Keypair::generate_ed25519().public().to_peer_id();
+        let mut dht = new_dht(local);
+        let query_id = find_closest_peers(&mut dht, recipient);
+        assert!(format!("{query_id:?}").len() > 0);
+    }
 
     #[test]
     fn dht_bootstrap_configuration_adds_peer_addresses() {
