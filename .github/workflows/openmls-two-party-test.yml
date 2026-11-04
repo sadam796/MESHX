@@ -1,0 +1,33 @@
+name: OpenMLS two-party encrypted message test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "spikes/openmls-android/**"
+      - ".github/workflows/openmls-two-party-test.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "spikes/openmls-android/**"
+      - ".github/workflows/openmls-two-party-test.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  two-party-roundtrip:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.91
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.91.0
+
+      - name: Run two-party MLS message test
+        working-directory: spikes/openmls-android
+        run: cargo test --locked
