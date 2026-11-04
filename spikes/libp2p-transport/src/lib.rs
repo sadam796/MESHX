@@ -3,6 +3,8 @@
 
 use std::collections::HashMap;
 
+use serde::{Deserialize, Serialize};
+
 pub const MAX_CIPHERTEXT_BYTES: usize = 1024 * 1024;
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_HOP_LIMIT: u8 = 16;
@@ -10,7 +12,7 @@ pub const MAX_TTL_SECONDS: u64 = 7 * 24 * 60 * 60;
 
 /// Opaque application ciphertext plus bounded routing metadata.
 /// The sender must encrypt and authenticate the payload before creating this envelope.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeliveryEnvelope {
     pub message_id: [u8; 16],
     pub sender_id: Vec<u8>,
@@ -42,6 +44,13 @@ impl DeliveryEnvelope {
         }
         Ok(())
     }
+}
+
+/// A transport-level acceptance response. This is not proof that a user read the message.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeliveryAck {
+    pub message_id: [u8; 16],
+    pub accepted: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
