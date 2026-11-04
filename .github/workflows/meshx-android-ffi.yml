@@ -1,0 +1,51 @@
+name: MESHX Android JNI FFI spike
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "spikes/meshx-android-ffi/**"
+      - "spikes/libp2p-transport/**"
+      - ".github/workflows/meshx-android-ffi.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "spikes/meshx-android-ffi/**"
+      - "spikes/libp2p-transport/**"
+      - ".github/workflows/meshx-android-ffi.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android-arm64-jni:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Rust and Android target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Install Android SDK and NDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: ndk;28.0.13004108
+          accept-android-sdk-licenses: true
+
+      - name: Configure Android linker
+        run: |
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$ANDROID_HOME/ndk/28.0.13004108/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang" >> "$GITHUB_ENV"
+          echo "CC_aarch64_linux_android=$ANDROID_HOME/ndk/28.0.13004108/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang" >> "$GITHUB_ENV"
+          echo "AR_aarch64_linux_android=$ANDROID_HOME/ndk/28.0.13004108/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar" >> "$GITHUB_ENV"
+
+      - name: Compile JNI shared library for Android ARM64
+        working-directory: spikes/meshx-android-ffi
+        run: cargo build --release --target aarch64-linux-android
+
+      - name: Run host-side FFI contract test
+        working-directory: spikes/meshx-android-ffi
+        run: cargo test
