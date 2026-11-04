@@ -91,6 +91,21 @@ pub fn start_dht_bootstrap(
     dht.bootstrap()
 }
 
+
+/// A Kademlia behaviour that can be installed directly in a libp2p Swarm.
+/// The owner must poll the Swarm continuously and process Kademlia events.
+#[derive(libp2p::swarm::NetworkBehaviour)]
+pub struct MeshxDiscoveryBehaviour {
+    pub kad: MeshxDht,
+}
+
+/// Builds the swarm-ready discovery behaviour for this node.
+pub fn new_discovery_behaviour(local_peer_id: libp2p::PeerId) -> MeshxDiscoveryBehaviour {
+    MeshxDiscoveryBehaviour {
+        kad: new_dht(local_peer_id),
+    }
+}
+
 /// Queries the DHT for peers closest to a recipient's stable libp2p peer ID.
 /// A result is only a set of candidate network peers; it does not prove that
 /// the recipient is online or that a message has been delivered.
