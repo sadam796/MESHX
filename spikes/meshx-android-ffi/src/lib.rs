@@ -103,14 +103,14 @@ fn start_swarm() -> Result<String, String> {
                 }
 
                 set_status(format!(
-                    "MESHX libp2p swarm starting; peer id {peer_label}; waiting for TCP listener"
+                    "MESHX libp2p swarm starting; peer id {thread_peer_label}; waiting for TCP listener"
                 ));
 
                 loop {
                     match swarm.select_next_some().await {
                         SwarmEvent::NewListenAddr { address, .. } => {
                             set_status(format!(
-                                "MESHX libp2p TCP listener active; peer id {peer_label}; address {address}"
+                                "MESHX libp2p TCP listener active; peer id {thread_peer_label}; address {address}"
                             ));
                         }
                         SwarmEvent::ListenerError { error, .. } => {
