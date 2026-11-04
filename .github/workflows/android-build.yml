@@ -20,7 +20,7 @@ jobs:
       - name: Install Rust and Android target
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android
+          targets: aarch64-linux-android,x86_64-linux-android
 
       - name: Install Android SDK and NDK
         uses: android-actions/setup-android@v3
@@ -33,15 +33,23 @@ jobs:
           echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$ANDROID_HOME/ndk/28.0.13004108/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang" >> "$GITHUB_ENV"
           echo "CC_aarch64_linux_android=$ANDROID_HOME/ndk/28.0.13004108/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang" >> "$GITHUB_ENV"
           echo "AR_aarch64_linux_android=$ANDROID_HOME/ndk/28.0.13004108/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER=$ANDROID_HOME/ndk/28.0.13004108/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android26-clang" >> "$GITHUB_ENV"
+          echo "CC_x86_64_linux_android=$ANDROID_HOME/ndk/28.0.13004108/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android26-clang" >> "$GITHUB_ENV"
+          echo "AR_x86_64_linux_android=$ANDROID_HOME/ndk/28.0.13004108/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar" >> "$GITHUB_ENV"
 
       - name: Build Rust JNI library for Android ARM64
         working-directory: spikes/meshx-android-ffi
         run: cargo build --release --target aarch64-linux-android
 
-      - name: Package Rust JNI library into Android app
+      - name: Build Rust JNI library for Android x86_64 emulator
+        working-directory: spikes/meshx-android-ffi
+        run: cargo build --release --target x86_64-linux-android
+
+      - name: Package Rust JNI libraries into Android app
         run: |
-          mkdir -p android/app/src/main/jniLibs/arm64-v8a
+          mkdir -p android/app/src/main/jniLibs/arm64-v8a android/app/src/main/jniLibs/x86_64
           cp spikes/meshx-android-ffi/target/aarch64-linux-android/release/libmeshx_android_ffi_spike.so android/app/src/main/jniLibs/arm64-v8a/libmeshx_android_ffi.so
+          cp spikes/meshx-android-ffi/target/x86_64-linux-android/release/libmeshx_android_ffi_spike.so android/app/src/main/jniLibs/x86_64/libmeshx_android_ffi.so
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -61,6 +69,14 @@ jobs:
       - name: Verify JNI library is packaged in APK
         run: |
           unzip -l android/app/build/outputs/apk/debug/app-debug.apk | grep 'lib/arm64-v8a/libmeshx_android_ffi.so'
+
+      - name: Run JNI call on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          script: gradle --no-daemon connectedDebugAndroidTest
 
       - name: Verify exported JNI entry point
         run: |
