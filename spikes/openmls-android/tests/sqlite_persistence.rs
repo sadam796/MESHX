@@ -1,9 +1,9 @@
 use openmls::prelude::{tls_codec::*, *};
-use openmls::storage::OpenMlsProvider;
+use openmls_traits::OpenMlsProvider;
 use openmls_basic_credential::SignatureKeyPair;
 use openmls_rust_crypto::RustCrypto;
 use openmls_sqlite_storage::{Codec, Connection, SqliteStorageProvider};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Serialize as SerdeSerialize};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -13,7 +13,7 @@ struct JsonCodec;
 impl Codec for JsonCodec {
     type Error = serde_json::Error;
 
-    fn to_vec<T: Serialize>(value: &T) -> Result<Vec<u8>, Self::Error> {
+    fn to_vec<T: SerdeSerialize>(value: &T) -> Result<Vec<u8>, Self::Error> {
         serde_json::to_vec(value)
     }
 
