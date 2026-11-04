@@ -29,11 +29,11 @@ jobs:
           toolchain: 1.91.0
           targets: aarch64-linux-android
 
-      - name: Install Android SDK and NDK
+      - name: Install Android SDK and pinned NDK
         uses: android-actions/setup-android@v3
-
-      - name: Install pinned Android NDK
-        run: sdkmanager "ndk;28.0.13004108"
+        with:
+          packages: ndk;28.0.13004108
+          accept-android-sdk-licenses: true
 
       - name: Configure Android linker
         run: |
