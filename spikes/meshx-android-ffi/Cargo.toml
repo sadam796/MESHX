@@ -1,0 +1,14 @@
+[package]
+name = "meshx-android-ffi-spike"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+jni = "=0.21.1"
+meshx-libp2p-transport-spike = { path = "../libp2p-transport" }
+
+[dev-dependencies]
