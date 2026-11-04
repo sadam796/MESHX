@@ -94,6 +94,7 @@ fn two_members_resume_encrypted_chat_after_database_reopen() {
     let bob_group_id;
     let alice_signer;
     let bob_signer;
+    let first_message_bytes;
 
     {
         let alice_provider = open_provider(&alice_db);
@@ -149,12 +150,12 @@ fn two_members_resume_encrypted_chat_after_database_reopen() {
         alice_group_id = alice_group.group_id().clone();
         bob_group_id = bob_group.group_id().clone();
 
-        let first = alice_group
+        first_message_bytes = alice_group
             .create_message(&alice_provider, &alice_signer, b"before restart")
             .expect("encrypt first message")
             .tls_serialize_detached()
             .expect("serialize first message");
-        let incoming = MlsMessageIn::tls_deserialize_exact(&first).expect("parse first message");
+        let incoming = MlsMessageIn::tls_deserialize_exact(&first_message_bytes).expect("parse first message");
         let protocol = incoming
             .try_into_protocol_message()
             .expect("convert first message");
@@ -199,6 +200,16 @@ fn two_members_resume_encrypted_chat_after_database_reopen() {
             }
             _ => panic!("expected application message"),
         }
+
+        // The replay window must also survive a process restart.
+        let replay = MlsMessageIn::tls_deserialize_exact(&first_message_bytes)
+            .expect("parse replay after restart")
+            .try_into_protocol_message()
+            .expect("convert replay after restart");
+        assert!(
+            bob_group.process_message(&bob_provider, replay).is_err(),
+            "Bob must reject a previously processed message after restart"
+        );
 
         assert_eq!(alice_group.epoch(), bob_group.epoch());
     }
