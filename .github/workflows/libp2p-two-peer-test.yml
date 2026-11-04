@@ -1,0 +1,29 @@
+name: libp2p two-peer transport test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "spikes/libp2p-transport/**"
+      - ".github/workflows/libp2p-two-peer-test.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "spikes/libp2p-transport/**"
+      - ".github/workflows/libp2p-two-peer-test.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  local-two-peer-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Run local two-peer TCP test
+        working-directory: spikes/libp2p-transport
+        run: cargo test --test two_peer_tcp -- --nocapture
