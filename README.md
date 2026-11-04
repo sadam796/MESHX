@@ -13,10 +13,12 @@ The Android prototype currently supports:
 - Local prototype chat records encrypted at rest using an Android Keystore AES-GCM key.
 - An isolated OpenMLS evaluation with passing tests for two-member message encryption, ciphertext tampering, replay rejection, and non-member rejection.
 - An isolated SQLite persistence test showing MLS group state can be reopened after simulated process restart on host CI.
+- An isolated libp2p localhost test for two authenticated peers over TCP/Noise/Yamux, subject to CI verification.
+- A bounded in-memory delivery-envelope queue prototype with size, expiry, hop-limit, duplicate-ID, and queue-capacity checks.
 
-The OpenMLS/SQLite spike is not integrated into the Android app. Its test database uses ordinary, unencrypted SQLite and is only a temporary CI fixture. It is not safe for real user data.
+The OpenMLS/SQLite spike is not integrated into the Android app. Its test database uses ordinary, unencrypted SQLite and is only a temporary CI fixture. It is not safe for real user data. The libp2p queue is volatile in-memory prototype code, not durable relay storage.
 
-**Not implemented:** worldwide Internet message transport, peer discovery, independent relays, offline store-and-forward, production end-to-end encrypted chats, encrypted media, Bluetooth/Wi-Fi Direct delivery, recovery phrase, encrypted backup, and iPhone app.
+**Not implemented:** worldwide Internet message transport in the app, peer discovery, independent relays, durable offline store-and-forward, production end-to-end encrypted chats, encrypted media, Bluetooth/Wi-Fi Direct delivery, recovery phrase, encrypted backup, and iPhone app.
 
 ## Product principles
 
@@ -26,7 +28,7 @@ The OpenMLS/SQLite spike is not integrated into the Android app. Its test databa
 - Relay devices and nodes should forward ciphertext, not read message contents.
 - Nearby Bluetooth/Wi-Fi Direct delivery is a complementary feature for devices in radio range; it does not by itself connect distant cities or countries.
 - No guaranteed delivery: connectivity, routing peers, recipient availability, Android background limits, and network restrictions affect delivery.
-- Never put message contents, media, private keys, or recovery phrases on a blockchain.
+- Never put message contents, media, private keys, or recovery phrases on-chain.
 
 ## Recovery
 
@@ -36,7 +38,7 @@ The planned recovery approach is a user-held 12- or 24-word recovery phrase, wit
 
 - `android/` — Android application scaffold and local prototype.
 - `spikes/openmls-android/` — isolated OpenMLS protocol and persistence evaluation; not wired into the app.
-- `spikes/libp2p-transport/` — isolated libp2p networking dependency/target-compatibility probe; not wired into the app.
+- `spikes/libp2p-transport/` — isolated libp2p peer-connectivity and bounded queue prototypes; not wired into the app.
 - `docs/ARCHITECTURE.md` — architecture and security boundaries.
 - `docs/ROADMAP.md` — staged implementation plan.
 - `docs/SECURITY_MODEL.md` — current protections, limitations, and release gates.
