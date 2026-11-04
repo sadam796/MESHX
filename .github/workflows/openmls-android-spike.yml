@@ -50,4 +50,4 @@ jobs:
 
       - name: Compile OpenMLS for Android ARM64
         working-directory: spikes/openmls-android
-        run: cargo check --target aarch64-linux-android
+        run: cargo check --tests --target aarch64-linux-android
