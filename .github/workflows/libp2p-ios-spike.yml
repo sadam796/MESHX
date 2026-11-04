@@ -1,0 +1,34 @@
+name: libp2p iOS ARM64 transport spike
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "spikes/libp2p-transport/**"
+      - ".github/workflows/libp2p-ios-spike.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "spikes/libp2p-transport/**"
+      - ".github/workflows/libp2p-ios-spike.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ios-arm64-check:
+    runs-on: macos-14
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.91 and iOS target
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.91.0
+          targets: aarch64-apple-ios
+
+      - name: Compile libp2p for iOS ARM64
+        working-directory: spikes/libp2p-transport
+        run: cargo check --target aarch64-apple-ios
