@@ -1,6 +1,6 @@
 # MESHX Internet Transport Evaluation
 
-## Status: recommended candidate; not integrated
+## Status: isolated direct-connection smoke test added; not integrated
 
 MESHX needs an Internet transport for global communication. The current Android app has no network message delivery.
 
@@ -22,6 +22,12 @@ Official references:
 7. **Message envelope:** use a bounded request/response protocol for delivery envelopes. Include message ID, sender/recipient protocol identity, expiry, hop limit, ciphertext, and authenticated receipt metadata. Do not broadcast private messages through a public pubsub topic.
 8. **Offline queue:** implement an explicit encrypted store-and-forward queue with expiry, quotas, duplicate suppression, and user opt-in. A relay can store only ciphertext. Delivery remains best-effort.
 
+## Implemented isolated test
+
+The tests/two_peer_tcp.rs test starts two independent libp2p swarms on localhost, lets Bob bind an ephemeral TCP port, dials Bob using his libp2p peer ID, and waits for a successful ping over the authenticated Noise/Yamux TCP connection. CI runs this host test separately from the Android ARM64 compile check.
+
+This is a transport smoke test only. It does not exchange application messages, use MLS ciphertext, test mobile carrier NAT, prove relay fallback, or establish global reachability. It is deliberately not connected to the Android app.
+
 ## Important mobile/NAT limitation
 
 Many mobile devices are behind carrier-grade NAT and cannot accept arbitrary inbound connections. QUIC uses UDP, which some networks block. TCP fallback and independent relay paths are therefore required. Rust libp2p's documented private-to-private hole-punching support has limitations; do not assume direct phone-to-phone connectivity will work on every carrier. Relay delivery is the baseline fallback, not an exceptional edge case.
@@ -39,7 +45,8 @@ A peer-to-peer architecture still needs bootstrap/discovery peers and reachable 
 
 ## Required prototype tests
 
-- [ ] Compile the pinned libp2p stack for Android ARM64 and iOS ARM64.
+- [x] Compile the pinned libp2p stack for Android ARM64 and iOS ARM64.
+- [x] Establish a local two-peer TCP connection with authenticated libp2p ping (host CI smoke test).
 - [ ] Establish two authenticated peer connections on separate networks.
 - [ ] Test QUIC and TCP fallback, including UDP-blocked networks.
 - [ ] Deliver an MLS ciphertext over a direct connection.
