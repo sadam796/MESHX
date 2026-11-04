@@ -40,6 +40,7 @@ fn start_swarm() -> Result<String, String> {
     let keypair = libp2p::identity::Keypair::generate_ed25519();
     let peer_id = keypair.public().to_peer_id();
     let peer_label = peer_id.to_string();
+    let thread_peer_label = peer_label.clone();
 
     let spawn_result = thread::Builder::new()
         .name("meshx-libp2p".to_owned())
@@ -117,12 +118,12 @@ fn start_swarm() -> Result<String, String> {
                         }
                         SwarmEvent::ConnectionEstablished { peer_id, .. } => {
                             set_status(format!(
-                                "MESHX libp2p connected to peer {peer_id}; local peer id {peer_label}"
+                                "MESHX libp2p connected to peer {peer_id}; local peer id {thread_peer_label}"
                             ));
                         }
                         SwarmEvent::ConnectionClosed { peer_id, .. } => {
                             set_status(format!(
-                                "MESHX peer disconnected: {peer_id}; local peer id {peer_label}"
+                                "MESHX peer disconnected: {peer_id}; local peer id {thread_peer_label}"
                             ));
                         }
                         _ => {}
