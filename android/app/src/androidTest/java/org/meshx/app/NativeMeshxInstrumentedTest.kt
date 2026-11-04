@@ -9,11 +9,11 @@ import org.junit.runner.RunWith
 class NativeMeshxInstrumentedTest {
     @Test
     fun packagedRustLibraryLoadsAndAnswersJniCall() {
-        val status = NativeMeshx.status()
+        val status = NativeMeshx.start()
         assertTrue(
             "Expected Rust JNI bridge to load, got: $status",
-            status.startsWith("MESHX native bridge loaded; transport not started")
+            status.startsWith("MESHX libp2p swarm starting")
         )
-        assertTrue(status.contains("max ciphertext"))
+        assertTrue(status.contains("peer id"))
     }
 }
