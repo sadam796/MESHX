@@ -84,6 +84,8 @@ pub struct MemoryQueue {
     max_entries: usize,
     max_bytes: usize,
     used_bytes: usize,
+    seen_ids: HashMap<[u8; 16], u64>,
+    max_seen: usize,
 }
 
 impl MemoryQueue {
@@ -95,20 +97,26 @@ impl MemoryQueue {
 
     /// Creates a queue bounded by both message count and total ciphertext bytes.
     pub fn with_limits(max_entries: usize, max_bytes: usize) -> Self {
-        Self { entries: HashMap::new(), max_entries, max_bytes, used_bytes: 0 }
+        Self {
+            entries: HashMap::new(), max_entries, max_bytes, used_bytes: 0,
+            seen_ids: HashMap::new(), max_seen: max_entries.saturating_mul(4).max(max_entries),
+        }
     }
 
     /// Returns true when inserted, false for an already queued message ID.
     pub fn enqueue(&mut self, envelope: DeliveryEnvelope, now: u64) -> Result<bool, EnvelopeError> {
         envelope.validate(now)?;
-        if self.entries.contains_key(&envelope.message_id) {
+        self.seen_ids.retain(|_, expires_at| now < *expires_at);
+        if self.seen_ids.contains_key(&envelope.message_id) {
             return Ok(false);
         }
         if self.entries.len() >= self.max_entries
-            || self.used_bytes.saturating_add(envelope.ciphertext.len()) > self.max_bytes {
+            || self.used_bytes.saturating_add(envelope.ciphertext.len()) > self.max_bytes
+            || self.seen_ids.len() >= self.max_seen {
             return Err(EnvelopeError::QueueFull);
         }
         self.used_bytes += envelope.ciphertext.len();
+        self.seen_ids.insert(envelope.message_id, envelope.expires_at);
         self.entries.insert(envelope.message_id, envelope);
         Ok(true)
     }
@@ -128,6 +136,7 @@ impl MemoryQueue {
     }
 
     pub fn expire(&mut self, now: u64) {
+        self.seen_ids.retain(|_, expires_at| now < *expires_at);
         self.entries.retain(|_, item| now < item.expires_at);
         self.used_bytes = self.entries.values()
             .map(|item| item.ciphertext.len())
@@ -166,6 +175,27 @@ mod tests {
         assert_eq!(queue.take_for(b"carol", 102).len(), 0);
         assert_eq!(queue.take_for(b"bob", 102).len(), 1);
         assert!(queue.is_empty());
+    }
+
+    #[test]
+    fn queue_remembers_delivered_ids_until_original_expiry() {
+        let mut queue = MemoryQueue::new(2);
+        let item = envelope(12, b"bob", 500);
+        assert_eq!(queue.enqueue(item.clone(), 101), Ok(true));
+        assert_eq!(queue.take_for(b"bob", 102).len(), 1);
+        assert!(queue.is_empty());
+        assert_eq!(queue.enqueue(item.clone(), 103), Ok(false), "delivered ID must remain deduplicated");
+        queue.expire(500);
+        assert_eq!(queue.enqueue(item, 501), Err(EnvelopeError::Expired));
+    }
+
+    #[test]
+    fn replay_cache_is_bounded() {
+        let mut queue = MemoryQueue::new(1);
+        assert_eq!(queue.enqueue(envelope(13, b"bob", 500), 101), Ok(true));
+        assert_eq!(queue.enqueue(envelope(14, b"bob", 500), 101), Err(EnvelopeError::QueueFull));
+        queue.take_for(b"bob", 102);
+        assert_eq!(queue.enqueue(envelope(14, b"bob", 500), 103), Ok(true));
     }
 
     #[test]
