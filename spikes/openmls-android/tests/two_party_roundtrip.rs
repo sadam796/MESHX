@@ -104,3 +104,65 @@ fn two_members_exchange_encrypted_application_message() {
         _ => panic!("expected an authenticated application message"),
     }
 }
+
+
+#[test]
+fn modified_ciphertext_is_rejected() {
+    let ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
+    let alice_provider = OpenMlsRustCrypto::default();
+    let bob_provider = OpenMlsRustCrypto::default();
+    let (alice_credential, alice_signer) =
+        make_identity(b"Alice-tamper", ciphersuite, &alice_provider);
+    let (bob_credential, bob_signer) =
+        make_identity(b"Bob-tamper", ciphersuite, &bob_provider);
+
+    let bob_key_package = KeyPackage::builder()
+        .build(ciphersuite, &bob_provider, &bob_signer, bob_credential)
+        .expect("build Bob key package");
+    let mut alice_group = MlsGroup::new(
+        &alice_provider,
+        &alice_signer,
+        &MlsGroupCreateConfig::default(),
+        alice_credential,
+    )
+    .expect("create Alice group");
+    let (_commit, welcome_out, _group_info) = alice_group
+        .add_members(&alice_provider, &alice_signer, &[bob_key_package.key_package().clone()])
+        .expect("add Bob");
+    alice_group.merge_pending_commit(&alice_provider).expect("merge commit");
+
+    let welcome_bytes = welcome_out.tls_serialize_detached().expect("serialize Welcome");
+    let welcome_message = MlsMessageIn::tls_deserialize_exact(&welcome_bytes).expect("parse Welcome");
+    let welcome = match welcome_message.extract() {
+        MlsMessageBodyIn::Welcome(welcome) => welcome,
+        _ => panic!("expected Welcome"),
+    };
+    let staged = StagedWelcome::new_from_welcome(
+        &bob_provider,
+        &MlsGroupJoinConfig::default(),
+        welcome,
+        Some(alice_group.export_ratchet_tree().into()),
+    )
+    .expect("stage Bob join");
+    let mut bob_group = staged.into_group(&bob_provider).expect("Bob joins");
+
+    let encrypted = alice_group
+        .create_message(&alice_provider, &alice_signer, b"do not alter this")
+        .expect("encrypt message");
+    let mut bytes = encrypted.tls_serialize_detached().expect("serialize ciphertext");
+    let index = bytes.len() / 2;
+    bytes[index] ^= 0x01;
+
+    match MlsMessageIn::tls_deserialize_exact(&bytes) {
+        Err(_) => {}
+        Ok(incoming) => {
+            let protocol_message = incoming
+                .try_into_protocol_message()
+                .expect("tampered packet remains a protocol message");
+            assert!(
+                bob_group.process_message(&bob_provider, protocol_message).is_err(),
+                "Bob must reject modified ciphertext"
+            );
+        }
+    }
+}
