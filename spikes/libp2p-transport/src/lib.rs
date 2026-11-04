@@ -278,8 +278,11 @@ pub struct MeshxNetworkBehaviour {
 /// Constructs the combined discovery + delivery behaviour.
 pub fn new_network_behaviour(local_peer_id: libp2p::PeerId) -> MeshxNetworkBehaviour {
     let delivery = libp2p::request_response::cbor::Behaviour::new(
-        libp2p::StreamProtocol::new("/meshx/delivery/1"),
-        libp2p::request_response::ProtocolSupport::Full,
+        [(
+            libp2p::StreamProtocol::new("/meshx/delivery/1"),
+            libp2p::request_response::ProtocolSupport::Full,
+        )],
+        libp2p::request_response::Config::default(),
     );
     MeshxNetworkBehaviour {
         kad: new_dht(local_peer_id),
