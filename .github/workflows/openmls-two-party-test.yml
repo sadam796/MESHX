@@ -30,4 +30,4 @@ jobs:
 
       - name: Run two-party MLS message test
         working-directory: spikes/openmls-android
-        run: cargo test --locked
+        run: cargo test
