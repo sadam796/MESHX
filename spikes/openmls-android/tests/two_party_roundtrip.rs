@@ -103,6 +103,16 @@ fn two_members_exchange_encrypted_application_message() {
         }
         _ => panic!("expected an authenticated application message"),
     }
+
+    // Replaying the exact same authenticated MLS message must fail.
+    let replay = MlsMessageIn::tls_deserialize_exact(&encrypted_bytes)
+        .expect("parse replayed encrypted message")
+        .try_into_protocol_message()
+        .expect("convert replay to MLS protocol message");
+    assert!(
+        bob_group.process_message(&bob_provider, replay).is_err(),
+        "Bob must reject a message that has already been processed"
+    );
 }
 
 
