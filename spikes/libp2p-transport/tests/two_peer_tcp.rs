@@ -10,7 +10,7 @@ use libp2p::{
     swarm::{NetworkBehaviour, Swarm, SwarmEvent},
     tcp, yamux, Multiaddr, StreamProtocol, SwarmBuilder,
 };
-use meshx_libp2p_transport_spike::{DeliveryAck, DeliveryEnvelope};
+use meshx_libp2p_transport_spike::{dial_bootstrap_peers, parse_bootstrap_peers, DeliveryAck, DeliveryEnvelope};
 
 const DELIVERY_PROTOCOL: &str = "/meshx/delivery/1";
 
@@ -70,9 +70,12 @@ async fn two_local_peers_exchange_delivery_envelope_and_ack() {
     .await
     .expect("Bob listen address timeout");
 
-    let mut dial_addr = bob_addr;
-    dial_addr.push(libp2p::multiaddr::Protocol::P2p(bob_peer));
-    alice.dial(dial_addr).expect("Alice dials Bob");
+    let bootstrap_address = format!("{bob_addr}/p2p/{bob_peer}");
+    let bootstrap_peers = parse_bootstrap_peers(&[&bootstrap_address])
+        .expect("valid bootstrap configuration");
+    let dial_results = dial_bootstrap_peers(&mut alice, &bootstrap_peers);
+    assert_eq!(dial_results.len(), 1);
+    assert!(dial_results.into_iter().all(|result| result.is_ok()));
 
     let mut request_sent = false;
     let mut payload_received = false;
