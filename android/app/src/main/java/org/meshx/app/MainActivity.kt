@@ -145,7 +145,7 @@ private fun makeQrBitmap(payload: String): android.graphics.Bitmap {
 @Composable
 private fun MeshxHome() {
     val context = LocalContext.current
-    val nativeTransportStatus = remember { NativeMeshx.status() }
+    val nativeTransportStatus = remember { NativeMeshx.start() }
     val prefs = remember { context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE) }
     var identity by remember { mutableStateOf<MeshxIdentity?>(null) }
     var importText by remember { mutableStateOf("") }
