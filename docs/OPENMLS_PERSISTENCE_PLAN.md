@@ -30,7 +30,7 @@ Do not connect this spike to the Android app yet.
 - [ ] Verify a corrupted/truncated database fails closed without silently creating a new identity or group.
 - [ ] Verify wrong/missing database key fails closed (requires encrypted database strategy).
 - [x] Use separate databases for independent users and verify their group state remains separate.
-- [ ] Run the SQLite provider and persistence tests as part of Android ARM64 cross-compilation.
+- [x] Compile the SQLite provider and persistence test code for Android ARM64 with `cargo check --tests` (compile check only; test executes on host).
 - [ ] Verify Android runtime persistence on physical devices.
 - [ ] Verify iOS storage separately if iOS support is pursued.
 
