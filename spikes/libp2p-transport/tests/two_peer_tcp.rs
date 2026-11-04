@@ -12,7 +12,7 @@ use libp2p::{
 };
 use meshx_libp2p_transport_spike::{
     dial_bootstrap_peers, new_network_behaviour, parse_bootstrap_peers,
-    DeliveryEnvelope, MeshxNetworkBehaviour,
+    DeliveryAck, DeliveryEnvelope, MeshxNetworkBehaviour,
 };
 
 fn make_swarm() -> Swarm<MeshxNetworkBehaviour> {
@@ -92,7 +92,7 @@ async fn two_local_peers_exchange_delivery_envelope_and_ack() {
                     }
                 }
                 event = bob.select_next_some() => {
-                    if let SwarmEvent::Behaviour(BehaviourEvent::Delivery(
+                    if let SwarmEvent::Behaviour(MeshxNetworkBehaviourEvent::Delivery(
                         request_response::Event::Message {
                             message: request_response::Message::Request { request, channel, .. },
                             ..
