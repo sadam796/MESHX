@@ -76,7 +76,7 @@ jobs:
           api-level: 35
           arch: x86_64
           target: google_apis
-          script: gradle --no-daemon connectedDebugAndroidTest
+          script: cd android && gradle --no-daemon connectedDebugAndroidTest
 
       - name: Verify exported JNI entry point
         run: |
