@@ -176,3 +176,80 @@ fn modified_ciphertext_is_rejected() {
         }
     }
 }
+
+
+#[test]
+fn non_member_cannot_process_another_groups_message() {
+    let ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
+    let alice_provider = OpenMlsRustCrypto::default();
+    let bob_provider = OpenMlsRustCrypto::default();
+    let outsider_provider = OpenMlsRustCrypto::default();
+
+    let (alice_credential, alice_signer) =
+        make_identity(b"Alice-outsider-test", ciphersuite, &alice_provider);
+    let (bob_credential, bob_signer) =
+        make_identity(b"Bob-outsider-test", ciphersuite, &bob_provider);
+    let (outsider_credential, outsider_signer) =
+        make_identity(b"Charlie-outsider-test", ciphersuite, &outsider_provider);
+
+    let bob_key_package = KeyPackage::builder()
+        .build(ciphersuite, &bob_provider, &bob_signer, bob_credential)
+        .expect("build Bob key package");
+    let mut alice_group = MlsGroup::new(
+        &alice_provider,
+        &alice_signer,
+        &MlsGroupCreateConfig::default(),
+        alice_credential,
+    )
+    .expect("create Alice group");
+    let (_commit, welcome_out, _group_info) = alice_group
+        .add_members(
+            &alice_provider,
+            &alice_signer,
+            core::slice::from_ref(bob_key_package.key_package()),
+        )
+        .expect("add Bob");
+    alice_group
+        .merge_pending_commit(&alice_provider)
+        .expect("merge add-member commit");
+
+    let welcome_bytes = welcome_out.tls_serialize_detached().expect("serialize Welcome");
+    let welcome = match MlsMessageIn::tls_deserialize_exact(&welcome_bytes)
+        .expect("parse Welcome")
+        .extract()
+    {
+        MlsMessageBodyIn::Welcome(welcome) => welcome,
+        _ => panic!("expected Welcome"),
+    };
+    let staged = StagedWelcome::new_from_welcome(
+        &bob_provider,
+        &MlsGroupJoinConfig::default(),
+        welcome,
+        Some(alice_group.export_ratchet_tree().into()),
+    )
+    .expect("stage Bob join");
+    let _bob_group = staged.into_group(&bob_provider).expect("Bob joins");
+
+    // Charlie creates a separate MLS group and is never added to Alice's group.
+    let mut outsider_group = MlsGroup::new(
+        &outsider_provider,
+        &outsider_signer,
+        &MlsGroupCreateConfig::default(),
+        outsider_credential,
+    )
+    .expect("create outsider's separate group");
+
+    let encrypted = alice_group
+        .create_message(&alice_provider, &alice_signer, b"members only")
+        .expect("encrypt group message");
+    let bytes = encrypted.tls_serialize_detached().expect("serialize ciphertext");
+    let incoming = MlsMessageIn::tls_deserialize_exact(&bytes).expect("parse ciphertext");
+    let protocol_message = incoming
+        .try_into_protocol_message()
+        .expect("convert to protocol message");
+
+    assert!(
+        outsider_group.process_message(&outsider_provider, protocol_message).is_err(),
+        "a non-member in another group must not process this group's message"
+    );
+}
