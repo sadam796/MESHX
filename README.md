@@ -39,6 +39,7 @@ The planned recovery approach is a user-held 12- or 24-word recovery phrase, wit
 - `docs/ARCHITECTURE.md` — architecture and security boundaries.
 - `docs/ROADMAP.md` — staged implementation plan.
 - `docs/SECURITY_MODEL.md` — current protections, limitations, and release gates.
+- `docs/TRANSPORT_DECISION.md` — Rust libp2p global transport evaluation and test gates.
 - `.github/workflows/` — cloud Android and Rust spike checks.
 
 ## Build
