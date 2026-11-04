@@ -46,6 +46,15 @@ pub fn parse_bootstrap_peers(addresses: &[&str]) -> Result<Vec<BootstrapPeer>, B
     Ok(parsed)
 }
 
+/// Initiates outbound dials to all configured bootstrap peers.
+/// The application must continue polling the swarm and handle failures/retries.
+pub fn dial_bootstrap_peers<B: libp2p::swarm::NetworkBehaviour>(
+    swarm: &mut libp2p::Swarm<B>,
+    peers: &[BootstrapPeer],
+) -> Vec<Result<(), libp2p::swarm::DialError>> {
+    peers.iter().map(|peer| swarm.dial(peer.address.clone())).collect()
+}
+
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_HOP_LIMIT: u8 = 16;
 pub const MAX_TTL_SECONDS: u64 = 7 * 24 * 60 * 60;
