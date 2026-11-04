@@ -24,8 +24,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Rust 1.91 and Android target
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.91.0
           targets: aarch64-linux-android
 
       - name: Install Android SDK and NDK
@@ -49,4 +50,4 @@ jobs:
 
       - name: Compile OpenMLS for Android ARM64
         working-directory: spikes/openmls-android
-        run: cargo check --locked --target aarch64-linux-android
+        run: cargo check --target aarch64-linux-android
