@@ -145,6 +145,7 @@ private fun makeQrBitmap(payload: String): android.graphics.Bitmap {
 @Composable
 private fun MeshxHome() {
     val context = LocalContext.current
+    val nativeTransportStatus = remember { NativeMeshx.status() }
     val prefs = remember { context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE) }
     var identity by remember { mutableStateOf<MeshxIdentity?>(null) }
     var importText by remember { mutableStateOf("") }
@@ -356,6 +357,7 @@ private fun MeshxHome() {
 
                 Spacer(Modifier.height(24.dp))
                 Text("Messaging engine — in development", style = MaterialTheme.typography.titleMedium)
+                Text(nativeTransportStatus, style = MaterialTheme.typography.bodySmall)
                 Text("Global Internet peer discovery, end-to-end encrypted delivery, media transfer, and nearby Bluetooth / Wi-Fi messaging are not connected yet.")
                 Spacer(Modifier.height(12.dp))
                 Text("Contact public keys and fingerprints are stored locally for future secure session setup. No message is sent yet. Recovery phrase, encrypted backup and messaging transport are still to be built.", style = MaterialTheme.typography.bodySmall)
