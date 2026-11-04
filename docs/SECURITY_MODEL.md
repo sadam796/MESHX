@@ -7,7 +7,7 @@ MESHX is an early Android prototype. The current app can create a device identit
 ## Current protections and limitations
 
 - The current device identity uses an Android Keystore EC key pair. The private key is intended to remain in that device's Keystore.
-- A contact QR currently carries a public key only. Importing it does not prove that the person is who they claim to be. Verify fingerprints with the contact through a separate trusted channel before trusting an identity.
+- A contact QR currently carries a public key only. Importing it does not prove that the person is who they claim to be. The app now displays a 128-bit SHA-256 fingerprint and provides a manual verification marker after the user compares it with the contact through a separate trusted channel. This marker is a user assertion, not a cryptographic handshake or proof by itself.
 - Local prototype chat records are encrypted at rest with AES-GCM using a key held by Android Keystore. This protects stored records against some forms of file extraction, but it is not end-to-end encryption and does not protect a compromised or unlocked device.
 - The current local message format and UI are prototype-only. No message is transmitted to a contact or relay.
 - Losing or resetting the device may make the local encryption key unavailable. Recovery and encrypted backup are not implemented.
