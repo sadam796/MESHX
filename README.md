@@ -35,8 +35,7 @@ The planned recovery approach is a user-held 12- or 24-word recovery phrase, wit
 ## Repository map
 
 - `android/` — Android application scaffold and local prototype.
-- `spikes/openmls-android/` — isolated OpenMLS protocol and persistence evaluation; not wired into the app.
-- `docs/ARCHITECTURE.md` — architecture and security boundaries.
+- `spikes/openmls-android/` — isolated OpenMLS protocol and persistence evaluation; not wired into the app.\n- `spikes/libp2p-transport/` — isolated libp2p networking dependency/target-compatibility probe; not wired into the app.\n- `docs/ARCHITECTURE.md` — architecture and security boundaries.
 - `docs/ROADMAP.md` — staged implementation plan.
 - `docs/SECURITY_MODEL.md` — current protections, limitations, and release gates.
 - `docs/TRANSPORT_DECISION.md` — Rust libp2p global transport evaluation and test gates.
