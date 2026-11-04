@@ -16,9 +16,9 @@ internal object NativeMeshx {
         error.message ?: "Native MESHX library load was blocked."
     }
 
-    private external fun nativeTransportStatus(): String
+    private external fun nativeTransportStatus(): String\n    private external fun nativeStartTransport(): String
 
-    fun status(): String = loadError?.let {
+    fun start(): String = loadError?.let {
         "Native bridge unavailable: $it"
     } ?: try {
         nativeTransportStatus()
