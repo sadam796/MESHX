@@ -36,6 +36,7 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import kotlinx.coroutines.delay
 
 private const val IDENTITY_ALIAS = "meshx_identity_v1"
 private const val PREFS_NAME = "meshx_local_contacts"
@@ -145,7 +146,13 @@ private fun makeQrBitmap(payload: String): android.graphics.Bitmap {
 @Composable
 private fun MeshxHome() {
     val context = LocalContext.current
-    val nativeTransportStatus = remember { NativeMeshx.start() }
+    var nativeTransportStatus by remember { mutableStateOf(NativeMeshx.start()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1500)
+            nativeTransportStatus = NativeMeshx.status()
+        }
+    }
     val prefs = remember { context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE) }
     var identity by remember { mutableStateOf<MeshxIdentity?>(null) }
     var importText by remember { mutableStateOf("") }
