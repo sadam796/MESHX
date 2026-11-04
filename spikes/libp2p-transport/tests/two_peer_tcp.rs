@@ -7,19 +7,15 @@ use std::time::Duration;
 use futures::StreamExt;
 use libp2p::{
     request_response,
-    swarm::{NetworkBehaviour, Swarm, SwarmEvent},
-    tcp, yamux, Multiaddr, StreamProtocol, SwarmBuilder,
+    swarm::{Swarm, SwarmEvent},
+    tcp, yamux, Multiaddr, SwarmBuilder,
 };
-use meshx_libp2p_transport_spike::{dial_bootstrap_peers, parse_bootstrap_peers, DeliveryAck, DeliveryEnvelope};
+use meshx_libp2p_transport_spike::{
+    dial_bootstrap_peers, new_network_behaviour, parse_bootstrap_peers,
+    DeliveryEnvelope, MeshxNetworkBehaviour,
+};
 
-const DELIVERY_PROTOCOL: &str = "/meshx/delivery/1";
-
-#[derive(NetworkBehaviour)]
-struct Behaviour {
-    delivery: request_response::cbor::Behaviour<DeliveryEnvelope, DeliveryAck>,
-}
-
-fn make_swarm() -> Swarm<Behaviour> {
+fn make_swarm() -> Swarm<MeshxNetworkBehaviour> {
     SwarmBuilder::with_new_identity()
         .with_tokio()
         .with_tcp(
@@ -28,15 +24,7 @@ fn make_swarm() -> Swarm<Behaviour> {
             yamux::Config::default,
         )
         .expect("TCP transport")
-        .with_behaviour(|_| Behaviour {
-            delivery: request_response::cbor::Behaviour::new(
-                [(
-                    StreamProtocol::new(DELIVERY_PROTOCOL),
-                    request_response::ProtocolSupport::Full,
-                )],
-                request_response::Config::default(),
-            ),
-        })
+        .with_behaviour(|key| new_network_behaviour(key.public().to_peer_id()))
         .expect("delivery behaviour")
         .build()
 }
@@ -90,7 +78,7 @@ async fn two_local_peers_exchange_delivery_envelope_and_ack() {
                             alice.behaviour_mut().delivery.send_request(&bob_peer, outgoing.clone());
                             request_sent = true;
                         }
-                        SwarmEvent::Behaviour(BehaviourEvent::Delivery(
+                        SwarmEvent::Behaviour(MeshxNetworkBehaviourEvent::Delivery(
                             request_response::Event::Message {
                                 message: request_response::Message::Response { response, .. },
                                 ..
