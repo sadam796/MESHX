@@ -269,7 +269,29 @@ pub type MeshxDeliveryBehaviour =
 
 /// A single behaviour that can be installed in a libp2p Swarm for both
 /// Kademlia peer discovery and request/response delivery.
+/// Explicit event type for the combined swarm behaviour. Naming the event
+/// removes ambiguity for integration tests and gives the Android bridge a
+/// stable event surface when this prototype is later exposed through FFI.
+#[derive(Debug)]
+pub enum MeshxEvent {
+    Kad(libp2p::kad::Event),
+    Delivery(libp2p::request_response::Event<DeliveryEnvelope, DeliveryAck>),
+}
+
+impl From<libp2p::kad::Event> for MeshxEvent {
+    fn from(event: libp2p::kad::Event) -> Self {
+        Self::Kad(event)
+    }
+}
+
+impl From<libp2p::request_response::Event<DeliveryEnvelope, DeliveryAck>> for MeshxEvent {
+    fn from(event: libp2p::request_response::Event<DeliveryEnvelope, DeliveryAck>) -> Self {
+        Self::Delivery(event)
+    }
+}
+
 #[derive(libp2p::swarm::NetworkBehaviour)]
+#[behaviour(to_swarm = "MeshxEvent")]
 pub struct MeshxNetworkBehaviour {
     pub kad: MeshxDht,
     pub delivery: MeshxDeliveryBehaviour,
