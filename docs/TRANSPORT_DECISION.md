@@ -1,6 +1,6 @@
 # MESHX Internet Transport Evaluation
 
-## Status: isolated direct-connection smoke test added; not integrated
+## Status: isolated localhost application-protocol test; not integrated
 
 MESHX needs an Internet transport for global communication. The current Android app has no network message delivery.
 
@@ -20,13 +20,15 @@ Official references:
 5. **Peer authentication:** use libp2p peer identity for transport-level peer authentication, but do not treat it as proof that a peer is the intended human contact. Human-contact verification remains a separate MESHX identity/fingerprint process.
 6. **Message protection:** MLS is the separate end-to-end security layer. libp2p transport encryption protects a connection hop; it does not replace MESHX end-to-end encryption.
 7. **Message envelope:** use a bounded request/response protocol for delivery envelopes. Include message ID, sender/recipient protocol identity, expiry, hop limit, ciphertext, and authenticated receipt metadata. Do not broadcast private messages through a public pubsub topic.
-8. **Offline queue:** implement an explicit encrypted store-and-forward queue with expiry, quotas, duplicate suppression, and user opt-in. A relay can store only ciphertext. Delivery remains best-effort.
+8. **Offline queue:** the isolated prototype has an in-memory ciphertext queue with entry and aggregate-byte quotas, expiry, duplicate suppression, and recipient retrieval. It is volatile test code, not encrypted durable relay storage.
 
-## Implemented isolated test
+## Implemented isolated tests
 
-The tests/two_peer_tcp.rs test starts two independent libp2p swarms on localhost, lets Bob bind an ephemeral TCP port, dials Bob using his libp2p peer ID, and waits for a successful ping over the authenticated Noise/Yamux TCP connection. CI runs this host test separately from the Android ARM64 compile check.
+The tests/two_peer_tcp.rs test starts two independent libp2p swarms on localhost, lets Bob bind an ephemeral TCP port, dials Bob using his libp2p peer ID, and exchanges an opaque request payload plus a response acknowledgement over the libp2p request-response CBOR protocol. The host CI test passes. The payload is deliberately test bytes, not MLS ciphertext or real encrypted user content.
 
-This is a transport smoke test only. It does not exchange application messages, use MLS ciphertext, test mobile carrier NAT, prove relay fallback, or establish global reachability. It is deliberately not connected to the Android app.
+The library unit tests cover queue deduplication, recipient-only retrieval, expiry, hop-limit validation, entry limits, aggregate ciphertext-byte limits, and quota release after retrieval/expiry. These are isolated Rust tests; the queue and request-response protocol are not connected to Android.
+
+This proves a local application-protocol exchange only. It does not test mobile carrier NAT, peer discovery, relay fallback, durable delivery, MLS integration, or global reachability.
 
 ## Important mobile/NAT limitation
 
@@ -46,7 +48,8 @@ A peer-to-peer architecture still needs bootstrap/discovery peers and reachable 
 ## Required prototype tests
 
 - [x] Compile the pinned libp2p stack for Android ARM64 and iOS ARM64.
-- [x] Establish a local two-peer TCP connection with authenticated libp2p ping (host CI smoke test).
+- [x] Establish a local two-peer TCP connection with authenticated libp2p handshake and exchange an opaque request/response payload (host CI).
+- [x] Unit-test queue expiry, duplicate suppression, recipient retrieval, hop limits, entry quota, and aggregate byte quota.
 - [ ] Establish two authenticated peer connections on separate networks.
 - [ ] Test QUIC and TCP fallback, including UDP-blocked networks.
 - [ ] Deliver an MLS ciphertext over a direct connection.
@@ -54,7 +57,7 @@ A peer-to-peer architecture still needs bootstrap/discovery peers and reachable 
 - [ ] Verify relay operators cannot decrypt the payload.
 - [ ] Test multiple bootstrap and relay operators; disable one and reconnect through another.
 - [ ] Measure battery use, background behavior, reconnection, and data usage on physical Android devices.
-- [ ] Test expiry, duplicate suppression, quotas, and offline queue behavior.
+- [ ] Replace the volatile queue with encrypted durable storage and test restart recovery.
 - [ ] Review metadata leakage and abuse resistance.
 
 ## Acceptance gate
