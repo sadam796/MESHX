@@ -278,6 +278,13 @@ mod tests {
 
 
     #[test]
+    fn discovery_is_exposed_as_a_swarm_network_behaviour() {
+        let local = libp2p::identity::Keypair::generate_ed25519().public().to_peer_id();
+        let behaviour = new_discovery_behaviour(local);
+        let _swarm_ready_kad = behaviour.kad;
+    }
+
+    #[test]
     fn dht_can_start_a_recipient_peer_lookup() {
         let local = libp2p::identity::Keypair::generate_ed25519().public().to_peer_id();
         let recipient = libp2p::identity::Keypair::generate_ed25519().public().to_peer_id();
