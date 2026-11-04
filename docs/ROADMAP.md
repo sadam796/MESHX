@@ -27,8 +27,10 @@ A planned feature is not implemented until it has working tests on the intended 
 - [x] Add a bounded in-memory opaque delivery-envelope queue prototype with expiry, duplicate-ID, hop-limit, ciphertext-size, entry-count, and aggregate-byte validation.
 - [x] Add a bounded parser for replaceable bootstrap multiaddresses with required peer identities, malformed/duplicate rejection, and a 32-endpoint cap (configuration parser only; no live discovery yet).
 - [ ] Implement live peer discovery/bootstrap connections that can use multiple replaceable endpoints.
-- [ ] Add a tested Rust-to-Kotlin FFI boundary for the transport and session layers; no native bridge is integrated yet.\n- [ ] Integrate the reviewed MLS/session layer into the Android app.
-- [ ] Integrate the JNI FFI spike into the Android app and verify Kotlin-to-Rust calls on a physical ARM64 device (current spike only exports a native status method; it does not start a Swarm).\n- [ ] Bind the app's human identity to protocol credentials with authenticated contact verification and identity-change warnings.
+- [ ] Verify the Rust-to-Kotlin JNI startup bridge on Android ARM64 and emulator CI.
+- [ ] Integrate the reviewed MLS/session layer into the Android app.
+- [ ] Verify native libp2p Swarm startup on a physical ARM64 Android device. Current code starts a TCP/Noise/Yamux listener; it does not yet discover peers or send app messages.
+- [ ] Bind the app's human identity to protocol credentials with authenticated contact verification and identity-change warnings.
 - [ ] Add authenticated delivery receipts, bounded retry, and durable message status.
 - [ ] Test between two phones on different networks, not only on the same Wi-Fi (deferred until code-side readiness).
 - [ ] Document what bootstrap, STUN, or relay infrastructure can observe.
