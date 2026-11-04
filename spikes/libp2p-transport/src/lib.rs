@@ -260,6 +260,33 @@ impl MemoryQueue {
     pub fn used_bytes(&self) -> usize { self.used_bytes }
 }
 
+
+/// Combined swarm behaviour for discovery and opaque message delivery.
+/// This remains a transport-layer prototype: callers must poll the Swarm,
+/// authenticate peers at the application layer, and supply MLS ciphertext.
+pub type MeshxDeliveryBehaviour =
+    libp2p::request_response::cbor::Behaviour<DeliveryEnvelope, DeliveryAck>;
+
+/// A single behaviour that can be installed in a libp2p Swarm for both
+/// Kademlia peer discovery and request/response delivery.
+#[derive(libp2p::swarm::NetworkBehaviour)]
+pub struct MeshxNetworkBehaviour {
+    pub kad: MeshxDht,
+    pub delivery: MeshxDeliveryBehaviour,
+}
+
+/// Constructs the combined discovery + delivery behaviour.
+pub fn new_network_behaviour(local_peer_id: libp2p::PeerId) -> MeshxNetworkBehaviour {
+    let delivery = libp2p::request_response::cbor::Behaviour::new(
+        libp2p::StreamProtocol::new("/meshx/delivery/1"),
+        libp2p::request_response::ProtocolSupport::Full,
+    );
+    MeshxNetworkBehaviour {
+        kad: new_dht(local_peer_id),
+        delivery,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
