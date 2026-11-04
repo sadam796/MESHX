@@ -57,31 +57,34 @@ fn start_swarm() -> Result<String, String> {
             };
 
             runtime.block_on(async move {
-                let mut swarm = match SwarmBuilder::with_existing_identity(keypair)
+                let builder = match SwarmBuilder::with_existing_identity(keypair)
                     .with_tokio()
                     .with_tcp(
                         tcp::Config::default(),
                         libp2p::noise::Config::new,
                         yamux::Config::default,
-                    )
-                    .map_err(|error| format!("MESHX TCP transport error: {error}"))
-                    .and_then(|builder| {
-                        builder
-                            .with_behaviour(|key| {
-                                meshx_libp2p_transport_spike::new_network_behaviour(
-                                    key.public().to_peer_id()
-                                )
-                            })
-                            .map_err(|error| format!("MESHX behaviour error: {error}"))
-                    })
-                {
-                    Ok(builder) => builder.build(),
+                    ) {
+                    Ok(builder) => builder,
                     Err(error) => {
-                        set_status(error);
+                        set_status(format!("MESHX TCP transport error: {error}"));
                         STARTED.store(false, Ordering::SeqCst);
                         return;
                     }
                 };
+
+                let builder = match builder.with_behaviour(|key| {
+                    meshx_libp2p_transport_spike::new_network_behaviour(
+                        key.public().to_peer_id()
+                    )
+                }) {
+                    Ok(builder) => builder,
+                    Err(error) => {
+                        set_status(format!("MESHX behaviour error: {error}"));
+                        STARTED.store(false, Ordering::SeqCst);
+                        return;
+                    }
+                };
+                let mut swarm = builder.build();
 
                 let listen_address: Multiaddr = match "/ip4/0.0.0.0/tcp/0".parse() {
                     Ok(address) => address,
