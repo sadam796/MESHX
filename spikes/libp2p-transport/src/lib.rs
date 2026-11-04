@@ -6,6 +6,46 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 pub const MAX_CIPHERTEXT_BYTES: usize = 1024 * 1024;
+pub const MAX_BOOTSTRAP_PEERS: usize = 32;
+
+/// A validated, replaceable bootstrap address. This is configuration only;
+/// it does not imply that the peer is reachable or trustworthy.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BootstrapPeer {
+    pub address: libp2p::Multiaddr,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BootstrapError {
+    TooManyPeers,
+    InvalidAddress,
+    MissingPeerIdentity,
+    DuplicateAddress,
+}
+
+/// Parses a bounded list of bootstrap multiaddresses and requires an explicit
+/// libp2p peer identity on each address. Callers should ship several independent
+/// operator endpoints and allow users to replace them.
+pub fn parse_bootstrap_peers(addresses: &[&str]) -> Result<Vec<BootstrapPeer>, BootstrapError> {
+    use std::str::FromStr;
+    if addresses.len() > MAX_BOOTSTRAP_PEERS {
+        return Err(BootstrapError::TooManyPeers);
+    }
+    let mut parsed = Vec::with_capacity(addresses.len());
+    for raw in addresses {
+        let address = libp2p::Multiaddr::from_str(raw)
+            .map_err(|_| BootstrapError::InvalidAddress)?;
+        if !matches!(address.iter().last(), Some(libp2p::multiaddr::Protocol::P2p(_))) {
+            return Err(BootstrapError::MissingPeerIdentity);
+        }
+        if parsed.iter().any(|peer: &BootstrapPeer| peer.address == address) {
+            return Err(BootstrapError::DuplicateAddress);
+        }
+        parsed.push(BootstrapPeer { address });
+    }
+    Ok(parsed)
+}
+
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_HOP_LIMIT: u8 = 16;
 pub const MAX_TTL_SECONDS: u64 = 7 * 24 * 60 * 60;
@@ -164,6 +204,27 @@ mod tests {
             hop_limit: 8,
             ciphertext: b"opaque-ciphertext".to_vec(),
         }
+    }
+
+    #[test]
+    fn bootstrap_list_rejects_addresses_without_peer_identity() {
+        assert_eq!(parse_bootstrap_peers(&["/ip4/127.0.0.1/tcp/4001"]), Err(BootstrapError::MissingPeerIdentity));
+    }
+
+    #[test]
+    fn bootstrap_list_rejects_malformed_and_duplicate_entries() {
+        assert_eq!(parse_bootstrap_peers(&["not-a-multiaddr"]), Err(BootstrapError::InvalidAddress));
+        let key = libp2p::identity::Keypair::generate_ed25519();
+        let peer_id = key.public().to_peer_id();
+        let address = format!("/ip4/127.0.0.1/tcp/4001/p2p/{peer_id}");
+        assert_eq!(parse_bootstrap_peers(&[&address, &address]), Err(BootstrapError::DuplicateAddress));
+        assert_eq!(parse_bootstrap_peers(&[]).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn bootstrap_list_enforces_maximum_size() {
+        let too_many = vec!["/ip4/127.0.0.1/tcp/4001"; MAX_BOOTSTRAP_PEERS + 1];
+        assert_eq!(parse_bootstrap_peers(&too_many), Err(BootstrapError::TooManyPeers));
     }
 
     #[test]
