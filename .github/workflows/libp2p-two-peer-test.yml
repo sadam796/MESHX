@@ -26,4 +26,4 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Run local two-peer TCP test
         working-directory: spikes/libp2p-transport
-        run: cargo test --test two_peer_tcp -- --nocapture
+        run: cargo test -- --nocapture
