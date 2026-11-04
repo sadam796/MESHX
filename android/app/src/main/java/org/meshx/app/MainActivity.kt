@@ -112,7 +112,7 @@ private data class MeshxIdentity(val fingerprint: String, val qrPayload: String)
 
 private fun fingerprint(publicKey: ByteArray): String {
     val digest = MessageDigest.getInstance("SHA-256").digest(publicKey)
-    return digest.take(8).joinToString("") { "%02X".format(it) }.chunked(4).joinToString("-")
+    return digest.take(16).joinToString("") { "%02X".format(it) }.chunked(4).joinToString("-")
 }
 
 private fun loadOrCreateIdentity(): MeshxIdentity {
@@ -148,9 +148,23 @@ private fun MeshxHome() {
     val prefs = remember { context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE) }
     var identity by remember { mutableStateOf<MeshxIdentity?>(null) }
     var importText by remember { mutableStateOf("") }
-    var contacts by remember { mutableStateOf(prefs.getStringSet("contacts", emptySet())?.toList() ?: emptyList()) }
     var contactPublicKeys by remember {
         mutableStateOf(prefs.getStringSet("contact_public_keys", emptySet())?.toSet() ?: emptySet())
+    }
+    var contacts by remember {
+        mutableStateOf(
+            contactPublicKeys.mapNotNull { payload ->
+                try {
+                    val encoded = payload.removePrefix("MESHX1:")
+                    fingerprint(Base64.decode(encoded, Base64.DEFAULT))
+                } catch (_: Exception) { null }
+            }.distinct().ifEmpty {
+                prefs.getStringSet("contacts", emptySet())?.toList() ?: emptyList()
+            }
+        )
+    }
+    var verifiedContacts by remember {
+        mutableStateOf(prefs.getStringSet("verified_contacts", emptySet())?.toSet() ?: emptySet())
     }
     var status by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -218,6 +232,7 @@ private fun MeshxHome() {
                 Spacer(Modifier.height(24.dp))
                 Text("Add a contact", style = MaterialTheme.typography.titleLarge)
                 Text("QR image gallery se select karein, ya public identity text paste karein.")
+                Text("Security: contact ka fingerprint us person se kisi alag trusted channel par compare karein. Sirf QR scan karna identity verify nahi karta.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 OutlinedButton(onClick = { qrImagePicker.launch("image/*") }) { Text("Import QR image from gallery") }
                 OutlinedTextField(
                     value = importText,
@@ -264,7 +279,15 @@ private fun MeshxHome() {
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(contact, modifier = Modifier.weight(1f))
+                            Column(Modifier.weight(1f)) {
+                                Text(contact, style = MaterialTheme.typography.bodySmall)
+                                Text(if (contact in verifiedContacts) "Manually fingerprint-verified" else "Not verified", color = if (contact in verifiedContacts) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+                                TextButton(onClick = {
+                                    val updated = if (contact in verifiedContacts) verifiedContacts - contact else verifiedContacts + contact
+                                    prefs.edit().putStringSet("verified_contacts", updated).apply()
+                                    verifiedContacts = updated
+                                }) { Text(if (contact in verifiedContacts) "Remove verification" else "I compared fingerprint") }
+                            }
                             TextButton(onClick = {
                                 selectedChat = contact
                                 messageDraft = ""
