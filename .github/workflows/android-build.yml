@@ -97,6 +97,8 @@ jobs:
             adb shell uiautomator dump /sdcard/meshx-window.xml >/dev/null
             adb pull /sdcard/meshx-window.xml /tmp/meshx-window.xml
             grep -q "MESHX libp2p TCP listener active" /tmp/meshx-window.xml
+            adb shell screencap -p /sdcard/meshx-home.png
+            adb pull /sdcard/meshx-home.png /tmp/meshx-home.png
 
       - name: Verify exported JNI entry point
         run: |
@@ -106,7 +108,9 @@ jobs:
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: meshx-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: meshx-debug-apk-and-ui
+          path: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+            /tmp/meshx-home.png
           if-no-files-found: error
           retention-days: 7
