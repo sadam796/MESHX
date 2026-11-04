@@ -186,6 +186,7 @@ private fun MeshxHome() {
                 Spacer(Modifier.height(24.dp))
                 Text("MESHX", style = MaterialTheme.typography.headlineLarge)
                 Text("Global private messaging")
+                Text("Android prototype — Internet delivery and end-to-end chat are still in development.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 Spacer(Modifier.height(24.dp))
                 Text("Your digital identity", style = MaterialTheme.typography.titleLarge)
                 Text("No phone number or email required. Your private key stays in Android Keystore on this device.")
@@ -278,7 +279,7 @@ private fun MeshxHome() {
                         Column(Modifier.fillMaxWidth().padding(16.dp)) {
                             Text("Chat with $chatId", style = MaterialTheme.typography.titleMedium)
                             Text(
-                                "LOCAL PROTOTYPE — messages stay on this phone. They are not encrypted or delivered to the other person yet.",
+                                "LOCAL PROTOTYPE — saved only on this phone. No Internet delivery or end-to-end encryption yet.",
                                 color = MaterialTheme.colorScheme.error,
                                 style = MaterialTheme.typography.bodySmall
                             )
