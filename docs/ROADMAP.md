@@ -23,12 +23,12 @@ A planned feature is not implemented until it has working tests on the intended 
 
 ## Stage 2 — first worldwide Internet messaging prototype
 - [x] Select libp2p 0.57.1 as the isolated transport candidate and compile-check Android/iOS targets.
-- [ ] Pass the local two-peer TCP/Noise/Yamux connection and request/response exchange test in host CI (test exists; latest event-type fix is awaiting CI confirmation; not app messaging).
+- [x] Pass the local two-peer TCP/Noise/Yamux connection and request/response exchange test in host CI (local protocol smoke test only; not app messaging or worldwide delivery).
 - [x] Add a bounded in-memory opaque delivery-envelope queue prototype with expiry, duplicate-ID, hop-limit, ciphertext-size, entry-count, and aggregate-byte validation.
 - [x] Add a bounded parser for replaceable bootstrap multiaddresses with required peer identities, malformed/duplicate rejection, and a 32-endpoint cap (configuration parser only; no live discovery yet).
 - [ ] Implement live peer discovery/bootstrap connections that can use multiple replaceable endpoints.
 - [ ] Add a tested Rust-to-Kotlin FFI boundary for the transport and session layers; no native bridge is integrated yet.\n- [ ] Integrate the reviewed MLS/session layer into the Android app.
-- [ ] Bind the app's human identity to protocol credentials with authenticated contact verification and identity-change warnings.
+- [ ] Integrate the JNI FFI spike into the Android app and verify Kotlin-to-Rust calls on a physical ARM64 device (current spike only exports a native status method; it does not start a Swarm).\n- [ ] Bind the app's human identity to protocol credentials with authenticated contact verification and identity-change warnings.
 - [ ] Add authenticated delivery receipts, bounded retry, and durable message status.
 - [ ] Test between two phones on different networks, not only on the same Wi-Fi (deferred until code-side readiness).
 - [ ] Document what bootstrap, STUN, or relay infrastructure can observe.
