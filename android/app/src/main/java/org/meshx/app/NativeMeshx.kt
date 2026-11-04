@@ -1,10 +1,9 @@
 package org.meshx.app
 
 /**
- * Thin JNI boundary for the Rust transport spike.
- *
- * This currently reports native-library availability only. It does not start
- * libp2p, establish peers, or send messages.
+ * JNI boundary for the native libp2p transport.
+ * The current native milestone starts a TCP/Noise/Yamux peer only; it does not
+ * yet discover contacts or deliver application messages.
  */
 internal object NativeMeshx {
     private val loadError: String? = try {
@@ -16,9 +15,18 @@ internal object NativeMeshx {
         error.message ?: "Native MESHX library load was blocked."
     }
 
-    private external fun nativeTransportStatus(): String\n    private external fun nativeStartTransport(): String
+    private external fun nativeTransportStatus(): String
+    private external fun nativeStartTransport(): String
 
     fun start(): String = loadError?.let {
+        "Native bridge unavailable: $it"
+    } ?: try {
+        nativeStartTransport()
+    } catch (error: UnsatisfiedLinkError) {
+        "Native bridge method unavailable: ${error.message ?: "unknown JNI error"}"
+    }
+
+    fun status(): String = loadError?.let {
         "Native bridge unavailable: $it"
     } ?: try {
         nativeTransportStatus()
