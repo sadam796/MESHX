@@ -1,0 +1,11 @@
+[package]
+name = "meshx-openmls-spike"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+openmls = { version = "=0.9.2", features = ["openmls_rust_crypto"] }
