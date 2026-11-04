@@ -2,7 +2,7 @@
 
 ## Status: design document, not a security audit
 
-MESHX is an early Android prototype. The current app can create a device identity, import a contact's public identity, and save local prototype chat records using Android Keystore AES-GCM. It does **not** yet provide end-to-end encrypted communication, authenticated key agreement, Internet delivery, relay routing, or recovery. Do not use the prototype for sensitive conversations.
+MESHX is an early Android prototype. The current app can create a device identity, import a contact's public identity, and save local prototype chat records using Android Keystore AES-GCM. An isolated Rust/OpenMLS test suite now exercises two-member MLS message encryption, tampering rejection, replay rejection, non-member rejection, and SQLite group-state restoration after a simulated restart. This test code is not connected to the Android app. Its temporary SQLite fixture is unencrypted and must not hold real user data. The app itself does **not** yet provide end-to-end encrypted communication, authenticated key agreement, Internet delivery, relay routing, or recovery. Do not use the prototype for sensitive conversations.
 
 ## Current protections and limitations
 
