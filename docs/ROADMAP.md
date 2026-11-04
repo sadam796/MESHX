@@ -16,7 +16,7 @@ This is a staged plan. A planned feature is not implemented until it has working
 - [x] Evaluate OpenMLS in an isolated Rust spike; host tests cover two-party encrypted messages, tampering, replay, and non-member rejection.
 - [x] Prove OpenMLS group-state persistence and replay rejection across provider/database reopen in a host-only SQLite test.\n- [x] Compile the OpenMLS SQLite provider and persistence test code for Android ARM64 in CI.
 - [ ] Select and implement encrypted persistent MLS storage suitable for Android.
-- [ ] Add contact fingerprint verification and identity-change warnings.
+- [x] Add interim 128-bit contact fingerprint display and manual verification marker (not protocol authentication).\n- [ ] Replace interim marker with protocol-authenticated verification and identity-change warnings.
 - [ ] Do not add phone-number or email registration.
 
 ## Stage 2 — first worldwide Internet messaging prototype
