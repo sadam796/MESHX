@@ -55,6 +55,42 @@ pub fn dial_bootstrap_peers<B: libp2p::swarm::NetworkBehaviour>(
     peers.iter().map(|peer| swarm.dial(peer.address.clone())).collect()
 }
 
+/// Kademlia DHT behaviour used for peer discovery experiments.
+pub type MeshxDht = libp2p::kad::Behaviour<libp2p::kad::store::MemoryStore>;
+
+/// Creates a DHT instance for this node. The DHT is a discovery/routing aid,
+/// not an identity service and not a guarantee that a recipient is online.
+pub fn new_dht(local_peer_id: libp2p::PeerId) -> MeshxDht {
+    let store = libp2p::kad::store::MemoryStore::new(local_peer_id);
+    let mut config = libp2p::kad::Config::default();
+    config.set_query_timeout(std::time::Duration::from_secs(30));
+    libp2p::kad::Behaviour::with_config(local_peer_id, store, config)
+}
+
+/// Adds configured bootstrap peers to the DHT routing table. The terminal
+/// /p2p component is removed because Kademlia stores the peer ID separately.
+pub fn add_dht_bootstrap_peers(dht: &mut MeshxDht, peers: &[BootstrapPeer]) -> usize {
+    let mut added = 0;
+    for peer in peers {
+        let mut address = peer.address.clone();
+        let peer_id = match address.pop() {
+            Some(libp2p::multiaddr::Protocol::P2p(peer_id)) => peer_id,
+            _ => continue,
+        };
+        dht.add_address(&peer_id, address);
+        added += 1;
+    }
+    added
+}
+
+/// Starts the Kademlia bootstrap query. Call after adding addresses while the
+/// owning Swarm is being polled.
+pub fn start_dht_bootstrap(
+    dht: &mut MeshxDht,
+) -> Result<libp2p::kad::QueryId, libp2p::kad::NoKnownPeers> {
+    dht.bootstrap()
+}
+
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_HOP_LIMIT: u8 = 16;
 pub const MAX_TTL_SECONDS: u64 = 7 * 24 * 60 * 60;
@@ -213,6 +249,19 @@ mod tests {
             hop_limit: 8,
             ciphertext: b"opaque-ciphertext".to_vec(),
         }
+    }
+
+
+    #[test]
+    fn dht_bootstrap_configuration_adds_peer_addresses() {
+        let local = libp2p::identity::Keypair::generate_ed25519().public().to_peer_id();
+        let remote_key = libp2p::identity::Keypair::generate_ed25519();
+        let remote = remote_key.public().to_peer_id();
+        let address = format!("/ip4/127.0.0.1/tcp/4001/p2p/{}", remote);
+        let peers = parse_bootstrap_peers(&[&address]).unwrap();
+        let mut dht = new_dht(local);
+        assert_eq!(add_dht_bootstrap_peers(&mut dht, &peers), 1);
+        assert!(start_dht_bootstrap(&mut dht).is_ok());
     }
 
     #[test]
