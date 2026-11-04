@@ -312,6 +312,14 @@ mod tests {
     }
 
     #[test]
+    fn combined_network_behaviour_contains_discovery_and_delivery() {
+        let local = libp2p::identity::Keypair::generate_ed25519().public().to_peer_id();
+        let behaviour = new_network_behaviour(local);
+        let _swarm_ready_kad = behaviour.kad;
+        let _swarm_ready_delivery = behaviour.delivery;
+    }
+
+    #[test]
     fn dht_can_start_a_recipient_peer_lookup() {
         let local = libp2p::identity::Keypair::generate_ed25519().public().to_peer_id();
         let recipient = libp2p::identity::Keypair::generate_ed25519().public().to_peer_id();
