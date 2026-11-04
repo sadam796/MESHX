@@ -23,9 +23,8 @@ A planned feature is not implemented until it has working tests on the intended 
 
 ## Stage 2 — first worldwide Internet messaging prototype
 - [x] Select libp2p 0.57.1 as the isolated transport candidate and compile-check Android/iOS targets.
-- [x] Add a local two-peer TCP/Noise/Yamux ping smoke test (host CI; not application messaging).
-- [x] Add a bounded in-memory opaque delivery-envelope queue prototype with expiry, duplicate-ID, hop-limit, size, and capacity validation.
-- [ ] Implement request/response application message transport; do not use public broadcast topics for private messages.
+- [x] Add a local two-peer TCP/Noise/Yamux connection and request/response exchange test (host CI only; not app messaging).
+- [x] Add a bounded in-memory opaque delivery-envelope queue prototype with expiry, duplicate-ID, hop-limit, ciphertext-size, entry-count, and aggregate-byte validation.
 - [ ] Implement peer discovery/bootstrap that can use multiple replaceable endpoints.
 - [ ] Integrate the reviewed MLS/session layer into the Android app.
 - [ ] Bind the app's human identity to protocol credentials with authenticated contact verification and identity-change warnings.
