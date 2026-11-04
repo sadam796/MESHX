@@ -1,0 +1,40 @@
+name: OpenMLS iOS ARM64 spike
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "spikes/openmls-android/**"
+      - ".github/workflows/openmls-ios-spike.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "spikes/openmls-android/**"
+      - ".github/workflows/openmls-ios-spike.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ios-arm64-check:
+    runs-on: macos-14
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.91 and iOS target
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.91.0
+          targets: aarch64-apple-ios
+
+      - name: Confirm Apple toolchain
+        run: |
+          rustc --version
+          cargo --version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Compile OpenMLS for iOS ARM64
+        working-directory: spikes/openmls-android
+        run: cargo check --target aarch64-apple-ios
