@@ -73,12 +73,12 @@ jobs:
       - name: Launch app and verify JNI call on Android emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: 34
           arch: x86_64
           target: google_apis
-          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot -wipe-data
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader -no-snapshot -wipe-data -memory 2048 -cores 2
           disable-animations: true
-          emulator-boot-timeout: 600
+          emulator-boot-timeout: 900
           script: |
             set -e
             adb wait-for-device
