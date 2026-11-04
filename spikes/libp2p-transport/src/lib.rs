@@ -60,11 +60,20 @@ pub enum EnvelopeError {
 pub struct MemoryQueue {
     entries: HashMap<[u8; 16], DeliveryEnvelope>,
     max_entries: usize,
+    max_bytes: usize,
+    used_bytes: usize,
 }
 
 impl MemoryQueue {
+    /// Creates a queue with an entry limit and a byte limit derived from the
+    /// maximum envelope size. Prefer with_limits when configuring a relay.
     pub fn new(max_entries: usize) -> Self {
-        Self { entries: HashMap::new(), max_entries }
+        Self::with_limits(max_entries, max_entries.saturating_mul(MAX_CIPHERTEXT_BYTES))
+    }
+
+    /// Creates a queue bounded by both message count and total ciphertext bytes.
+    pub fn with_limits(max_entries: usize, max_bytes: usize) -> Self {
+        Self { entries: HashMap::new(), max_entries, max_bytes, used_bytes: 0 }
     }
 
     /// Returns true when inserted, false for an already queued message ID.
@@ -73,29 +82,41 @@ impl MemoryQueue {
         if self.entries.contains_key(&envelope.message_id) {
             return Ok(false);
         }
-        if self.entries.len() >= self.max_entries {
+        if self.entries.len() >= self.max_entries
+            || self.used_bytes.saturating_add(envelope.ciphertext.len()) > self.max_bytes {
             return Err(EnvelopeError::QueueFull);
         }
+        self.used_bytes += envelope.ciphertext.len();
         self.entries.insert(envelope.message_id, envelope);
         Ok(true)
     }
 
     pub fn take_for(&mut self, recipient: &[u8], now: u64) -> Vec<DeliveryEnvelope> {
-        self.entries.retain(|_, item| now < item.expires_at);
+        self.expire(now);
         let ids: Vec<[u8; 16]> = self.entries.iter()
             .filter(|(_, item)| item.recipient_id == recipient)
             .map(|(id, _)| *id)
             .collect();
-        ids.into_iter().filter_map(|id| self.entries.remove(&id)).collect()
+        ids.into_iter().filter_map(|id| {
+            self.entries.remove(&id).map(|item| {
+                self.used_bytes = self.used_bytes.saturating_sub(item.ciphertext.len());
+                item
+            })
+        }).collect()
     }
 
     pub fn expire(&mut self, now: u64) {
         self.entries.retain(|_, item| now < item.expires_at);
+        self.used_bytes = self.entries.values()
+            .map(|item| item.ciphertext.len())
+            .sum();
     }
 
     pub fn len(&self) -> usize { self.entries.len() }
 
     pub fn is_empty(&self) -> bool { self.entries.is_empty() }
+
+    pub fn used_bytes(&self) -> usize { self.used_bytes }
 }
 
 #[cfg(test)]
@@ -144,5 +165,37 @@ mod tests {
         let mut item = envelope(5, b"bob", 500);
         item.hop_limit = 0;
         assert_eq!(item.validate(101), Err(EnvelopeError::InvalidHopLimit));
+    }
+
+    #[test]
+    fn queue_enforces_total_byte_limit() {
+        let mut queue = MemoryQueue::with_limits(10, 20);
+        let mut first = envelope(6, b"bob", 500);
+        first.ciphertext = vec![1; 12];
+        let mut second = envelope(7, b"bob", 500);
+        second.ciphertext = vec![2; 9];
+
+        assert_eq!(queue.enqueue(first, 101), Ok(true));
+        assert_eq!(queue.used_bytes(), 12);
+        assert_eq!(queue.enqueue(second, 101), Err(EnvelopeError::QueueFull));
+        assert_eq!(queue.used_bytes(), 12);
+    }
+
+    #[test]
+    fn taking_and_expiring_messages_releases_byte_quota() {
+        let mut queue = MemoryQueue::with_limits(10, 30);
+        let mut for_bob = envelope(8, b"bob", 500);
+        for_bob.ciphertext = vec![1; 10];
+        let mut for_carol = envelope(9, b"carol", 110);
+        for_carol.ciphertext = vec![2; 7];
+
+        assert_eq!(queue.enqueue(for_bob, 101), Ok(true));
+        assert_eq!(queue.enqueue(for_carol, 101), Ok(true));
+        assert_eq!(queue.used_bytes(), 17);
+        assert_eq!(queue.take_for(b"bob", 102).len(), 1);
+        assert_eq!(queue.used_bytes(), 7);
+        queue.expire(110);
+        assert_eq!(queue.used_bytes(), 0);
+        assert!(queue.is_empty());
     }
 }
