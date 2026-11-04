@@ -1,0 +1,28 @@
+[package]
+name = "meshx-libp2p-transport-spike"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+libp2p = { version = "=0.57.1", default-features = false, features = [
+    "autonat",
+    "dcutr",
+    "dns",
+    "ed25519",
+    "identify",
+    "kad",
+    "macros",
+    "noise",
+    "ping",
+    "quic",
+    "relay",
+    "rendezvous",
+    "request-response",
+    "tcp",
+    "tokio",
+    "yamux",
+] }
