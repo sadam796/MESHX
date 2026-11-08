@@ -26,11 +26,15 @@ internal object NativeMeshx {
         "Native bridge method unavailable: ${error.message ?: "unknown JNI error"}"
     }
 
-    fun status(): String = loadError?.let {
-        "Native bridge unavailable: $it"
-    } ?: try {
-        nativeTransportStatus()
-    } catch (error: UnsatisfiedLinkError) {
-        "Native bridge method unavailable: ${error.message ?: "unknown JNI error"}"
+    fun status(): String {
+        val value = loadError?.let {
+            "Native bridge unavailable: $it"
+        } ?: try {
+            nativeTransportStatus()
+        } catch (error: UnsatisfiedLinkError) {
+            "Native bridge method unavailable: ${error.message ?: "unknown JNI error"}"
+        }
+        android.util.Log.i("MESHX_NATIVE", value)
+        return value
     }
 }
