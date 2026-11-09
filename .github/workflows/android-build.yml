@@ -101,8 +101,11 @@ jobs:
             ! grep -q "FATAL EXCEPTION" /tmp/meshx-android-runtime-errors.log
             adb logcat -d -s MESHX_NATIVE:I | tee /tmp/meshx-native-status.log
             grep -q "MESHX libp2p TCP listener active" /tmp/meshx-native-status.log
-            FIRST_PEER_ID=$(grep "MESHX libp2p TCP listener active" /tmp/meshx-native-status.log | tail -n 1 | sed -n 's/.*peer id \([^;]*\);.*/\1/p')
+            FIRST_STATUS_LINE=$(grep "MESHX libp2p TCP listener active" /tmp/meshx-native-status.log | tail -n 1)
+            FIRST_PEER_ID=${FIRST_STATUS_LINE#*peer id }
+            FIRST_PEER_ID=${FIRST_PEER_ID%%;*}
             test -n "$FIRST_PEER_ID"
+            test "$FIRST_STATUS_LINE" != "$FIRST_PEER_ID"
             adb shell am force-stop org.meshx.app
             adb logcat -c
             adb shell monkey -p org.meshx.app 1
@@ -110,8 +113,11 @@ jobs:
             adb shell pidof org.meshx.app
             adb logcat -d -s MESHX_NATIVE:I | tee /tmp/meshx-native-status-after-restart.log
             grep -q "MESHX libp2p TCP listener active" /tmp/meshx-native-status-after-restart.log
-            SECOND_PEER_ID=$(grep "MESHX libp2p TCP listener active" /tmp/meshx-native-status-after-restart.log | tail -n 1 | sed -n 's/.*peer id \([^;]*\);.*/\1/p')
+            SECOND_STATUS_LINE=$(grep "MESHX libp2p TCP listener active" /tmp/meshx-native-status-after-restart.log | tail -n 1)
+            SECOND_PEER_ID=${SECOND_STATUS_LINE#*peer id }
+            SECOND_PEER_ID=${SECOND_PEER_ID%%;*}
             test -n "$SECOND_PEER_ID"
+            test "$SECOND_STATUS_LINE" != "$SECOND_PEER_ID"
             test "$FIRST_PEER_ID" = "$SECOND_PEER_ID"
             echo "MESHX persistent Peer ID verified after app restart: $SECOND_PEER_ID"
             adb shell screencap -p /sdcard/meshx-home.png
