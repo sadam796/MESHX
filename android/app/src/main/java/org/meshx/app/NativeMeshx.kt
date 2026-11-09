@@ -16,12 +16,24 @@ internal object NativeMeshx {
     }
 
     private external fun nativeTransportStatus(): String
-    private external fun nativeStartTransport(): String
+    private external fun nativeGenerateIdentity(): ByteArray
+    private external fun nativeStartTransport(identity: ByteArray): String
 
-    fun start(): String = loadError?.let {
+    fun generateIdentity(): ByteArray {
+        check(loadError == null) { "Native bridge unavailable: $loadError" }
+        return try {
+            nativeGenerateIdentity().also {
+                check(it.isNotEmpty()) { "Native MESHX identity generation returned no key." }
+            }
+        } catch (error: UnsatisfiedLinkError) {
+            throw IllegalStateException("Native identity generator unavailable: ${error.message ?: "unknown JNI error"}", error)
+        }
+    }
+
+    fun start(identity: ByteArray): String = loadError?.let {
         "Native bridge unavailable: $it"
     } ?: try {
-        nativeStartTransport()
+        nativeStartTransport(identity)
     } catch (error: UnsatisfiedLinkError) {
         "Native bridge method unavailable: ${error.message ?: "unknown JNI error"}"
     }
