@@ -8,7 +8,7 @@ use std::{
 };
 
 use futures::StreamExt;
-use jni::{objects::JObject, sys::jstring, JNIEnv};
+use jni::{objects::{JByteArray, JObject}, sys::{jbyteArray, jstring}, JNIEnv};
 use libp2p::{swarm::SwarmEvent, tcp, yamux, Multiaddr, SwarmBuilder};
 
 static STARTED: AtomicBool = AtomicBool::new(false);
@@ -32,12 +32,14 @@ fn current_status() -> String {
         .unwrap_or_else(|_| "MESHX transport status unavailable".to_owned())
 }
 
-fn start_swarm() -> Result<String, String> {
+fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
+    let keypair = libp2p::identity::Keypair::from_protobuf_encoding(identity_bytes)
+        .map_err(|error| format!("MESHX saved transport identity is invalid: {error}"))?;
+
     if STARTED.swap(true, Ordering::SeqCst) {
         return Ok(current_status());
     }
 
-    let keypair = libp2p::identity::Keypair::generate_ed25519();
     let peer_id = keypair.public().to_peer_id();
     let peer_label = peer_id.to_string();
     let thread_peer_label = peer_label.clone();
@@ -164,19 +166,53 @@ pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeTransportStatus(
     jni_string(&mut env, current_status())
 }
 
-/// Kotlin: NativeMeshx.nativeStartTransport()
+/// Kotlin: NativeMeshx.nativeGenerateIdentity()
+#[no_mangle]
+pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeGenerateIdentity(
+    mut env: JNIEnv,
+    _this: JObject,
+) -> jbyteArray {
+    let keypair = libp2p::identity::Keypair::generate_ed25519();
+    match keypair.to_protobuf_encoding() {
+        Ok(bytes) => env.byte_array_from_slice(&bytes)
+            .map(|array| array.into_raw())
+            .unwrap_or(std::ptr::null_mut()),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// Kotlin: NativeMeshx.nativeStartTransport(identity: ByteArray)
 #[no_mangle]
 pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeStartTransport(
     mut env: JNIEnv,
     _this: JObject,
+    identity: JByteArray,
 ) -> jstring {
-    let result = start_swarm().unwrap_or_else(|error| error);
+    let result = match env.convert_byte_array(&identity) {
+        Ok(bytes) => start_swarm(&bytes).unwrap_or_else(|error| error),
+        Err(error) => format!("MESHX identity could not be read from Android: {error}"),
+    };
     jni_string(&mut env, result)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn persisted_identity_restores_the_same_peer_id() {
+        let original = libp2p::identity::Keypair::generate_ed25519();
+        let expected_peer_id = original.public().to_peer_id();
+        let encoded = original.to_protobuf_encoding().expect("encode identity");
+        let restored = libp2p::identity::Keypair::from_protobuf_encoding(&encoded)
+            .expect("decode saved identity");
+        assert_eq!(expected_peer_id, restored.public().to_peer_id());
+    }
+
+    #[test]
+    fn invalid_persisted_identity_is_rejected() {
+        assert!(libp2p::identity::Keypair::from_protobuf_encoding(b"not a key").is_err());
+    }
 
     #[test]
     fn initial_status_is_honest_about_not_started_transport() {
