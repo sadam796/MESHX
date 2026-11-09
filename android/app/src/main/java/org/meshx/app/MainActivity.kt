@@ -42,6 +42,64 @@ private const val IDENTITY_ALIAS = "meshx_identity_v1"
 private const val PREFS_NAME = "meshx_local_contacts"
 
 private const val MESSAGE_KEY_ALIAS = "meshx_local_messages_aes_v1"
+private const val TRANSPORT_IDENTITY_KEY_ALIAS = "meshx_transport_identity_aes_v1"
+private const val TRANSPORT_IDENTITY_PREF = "native_transport_identity_v1"
+
+private fun getOrCreateTransportIdentityKey(): SecretKey {
+    val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+    val existing = store.getKey(TRANSPORT_IDENTITY_KEY_ALIAS, null) as? SecretKey
+    if (existing != null) return existing
+    val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+    generator.init(
+        KeyGenParameterSpec.Builder(
+            TRANSPORT_IDENTITY_KEY_ALIAS,
+            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+        ).setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+            .setRandomizedEncryptionRequired(true)
+            .build()
+    )
+    return generator.generateKey()
+}
+
+private fun encryptTransportIdentity(value: ByteArray): String {
+    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+    cipher.init(Cipher.ENCRYPT_MODE, getOrCreateTransportIdentityKey())
+    val encrypted = cipher.doFinal(value)
+    return "MESHXENC1:" + Base64.encodeToString(cipher.iv + encrypted, Base64.NO_WRAP)
+}
+
+private fun decryptTransportIdentity(value: String): ByteArray {
+    require(value.startsWith("MESHXENC1:")) { "Saved MESHX transport identity has an unknown format." }
+    val combined = Base64.decode(value.removePrefix("MESHXENC1:"), Base64.DEFAULT)
+    require(combined.size > 28) { "Saved MESHX transport identity is incomplete." }
+    val iv = combined.copyOfRange(0, 12)
+    val encrypted = combined.copyOfRange(12, combined.size)
+    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+    cipher.init(Cipher.DECRYPT_MODE, getOrCreateTransportIdentityKey(), GCMParameterSpec(128, iv))
+    return cipher.doFinal(encrypted)
+}
+
+private fun loadOrCreateTransportIdentity(prefs: android.content.SharedPreferences): ByteArray {
+    val saved = prefs.getString(TRANSPORT_IDENTITY_PREF, null)
+    if (saved != null) {
+        return try {
+            decryptTransportIdentity(saved)
+        } catch (error: Exception) {
+            throw IllegalStateException(
+                "Saved MESHX transport identity could not be unlocked. It was kept unchanged; do not clear app data.",
+                error
+            )
+        }
+    }
+
+    val generated = NativeMeshx.generateIdentity()
+    val encrypted = encryptTransportIdentity(generated)
+    check(prefs.edit().putString(TRANSPORT_IDENTITY_PREF, encrypted).commit()) {
+        "MESHX transport identity could not be saved securely."
+    }
+    return generated
+}
 
 private fun getOrCreateMessageKey(): SecretKey {
     val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
@@ -146,14 +204,22 @@ private fun makeQrBitmap(payload: String): android.graphics.Bitmap {
 @Composable
 private fun MeshxHome() {
     val context = LocalContext.current
-    var nativeTransportStatus by remember { mutableStateOf(NativeMeshx.start()) }
+    val prefs = remember { context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE) }
+    var nativeTransportStatus by remember {
+        mutableStateOf(
+            try {
+                NativeMeshx.start(loadOrCreateTransportIdentity(prefs))
+            } catch (error: Exception) {
+                "MESHX transport identity error: ${error.localizedMessage ?: "secure identity unavailable"}"
+            }
+        )
+    }
     LaunchedEffect(Unit) {
         while (true) {
             delay(1500)
             nativeTransportStatus = NativeMeshx.status()
         }
     }
-    val prefs = remember { context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE) }
     var identity by remember { mutableStateOf<MeshxIdentity?>(null) }
     var importText by remember { mutableStateOf("") }
     var contactPublicKeys by remember {
