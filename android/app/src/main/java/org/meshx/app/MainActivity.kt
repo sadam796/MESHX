@@ -205,19 +205,26 @@ private fun makeQrBitmap(payload: String): android.graphics.Bitmap {
 private fun MeshxHome() {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE) }
-    var nativeTransportStatus by remember {
-        mutableStateOf(
-            try {
-                NativeMeshx.start(loadOrCreateTransportIdentity(prefs))
-            } catch (error: Exception) {
-                "MESHX transport identity error: ${error.localizedMessage ?: "secure identity unavailable"}"
-            }
-        )
-    }
+    var nativeTransportStatus by remember { mutableStateOf("Preparing secure MESHX identity…") }
+    var nativeTransportReady by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        while (true) {
-            delay(1500)
-            nativeTransportStatus = NativeMeshx.status()
+        try {
+            val transportIdentity = loadOrCreateTransportIdentity(prefs)
+            val startResult = NativeMeshx.start(transportIdentity)
+            nativeTransportStatus = startResult
+            nativeTransportReady = startResult.startsWith("MESHX libp2p swarm starting")
+                || startResult.contains("MESHX libp2p TCP listener active")
+        } catch (error: Exception) {
+            nativeTransportStatus = "MESHX transport identity error: ${error.localizedMessage ?: "secure identity unavailable"}"
+            nativeTransportReady = false
+        }
+    }
+    LaunchedEffect(nativeTransportReady) {
+        if (nativeTransportReady) {
+            while (true) {
+                delay(1500)
+                nativeTransportStatus = NativeMeshx.status()
+            }
         }
     }
     var identity by remember { mutableStateOf<MeshxIdentity?>(null) }
