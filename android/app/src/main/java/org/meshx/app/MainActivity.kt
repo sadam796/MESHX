@@ -455,6 +455,16 @@ private fun MeshxHome() {
                                     prefs.edit().putStringSet("verified_contacts", updated).apply()
                                     verifiedContacts = updated
                                 }) { Text(if (contact in verifiedContacts) "Remove verification" else "I compared fingerprint") }
+                                if (boundPeerId != null) {
+                                    TextButton(
+                                        onClick = {
+                                            val result = NativeMeshx.findPeer(boundPeerId)
+                                            status = result
+                                            error = result.takeIf { it.startsWith("MESHX peer discovery error:") }
+                                        },
+                                        enabled = nativeTransportReady
+                                    ) { Text("Search via DHT") }
+                                }
                             }
                             TextButton(onClick = {
                                 selectedChat = contact
@@ -543,6 +553,7 @@ private fun MeshxHome() {
                 ) { Text("Connect to bootstrap peers") }
                 Text(nativeTransportStatus, style = MaterialTheme.typography.bodySmall)
                 Text("A bootstrap address only starts peer discovery. It does not guarantee that another contact is reachable, that messages are delivered, or that a relay is available.")
+                Text("MESHX2 contacts can be searched by their signed transport Peer ID. DHT results are candidate routing peers only; they do not prove that the recipient is online.")
                 Spacer(Modifier.height(8.dp))
                 Text("Messaging engine — in development", style = MaterialTheme.typography.titleMedium)
                 Text("Global end-to-end encrypted message delivery, durable relays, media transfer, and nearby Bluetooth / Wi-Fi messaging are not connected yet.")
