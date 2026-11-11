@@ -8,11 +8,20 @@ use std::{
 };
 
 use futures::StreamExt;
-use jni::{objects::{JByteArray, JObject}, sys::{jbyteArray, jstring}, JNIEnv};
+use jni::{objects::{JByteArray, JObject, JString}, sys::{jbyteArray, jstring}, JNIEnv};
 use libp2p::{swarm::SwarmEvent, tcp, yamux, Multiaddr, SwarmBuilder};
+
+enum TransportCommand {
+    AddBootstrapPeers(Vec<String>),
+}
 
 static STARTED: AtomicBool = AtomicBool::new(false);
 static STATUS: OnceLock<Mutex<String>> = OnceLock::new();
+static COMMAND_SENDER: OnceLock<Mutex<Option<tokio::sync::mpsc::UnboundedSender<TransportCommand>>>> = OnceLock::new();
+
+fn command_sender_store() -> &'static Mutex<Option<tokio::sync::mpsc::UnboundedSender<TransportCommand>>> {
+    COMMAND_SENDER.get_or_init(|| Mutex::new(None))
+}
 
 fn status_store() -> &'static Mutex<String> {
     STATUS.get_or_init(|| Mutex::new(
@@ -32,6 +41,33 @@ fn current_status() -> String {
         .unwrap_or_else(|_| "MESHX transport status unavailable".to_owned())
 }
 
+fn parse_bootstrap_input(raw: &str) -> Result<Vec<String>, String> {
+    let addresses: Vec<String> = raw.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_owned)
+        .collect();
+    let address_refs: Vec<&str> = addresses.iter().map(String::as_str).collect();
+    let parsed = meshx_libp2p_transport_spike::parse_bootstrap_peers(&address_refs)
+        .map_err(|error| format!("Invalid MESHX bootstrap list: {error:?}"))?;
+    Ok(parsed.into_iter().map(|peer| peer.address.to_string()).collect())
+}
+
+fn queue_bootstrap_peers(raw: &str) -> Result<String, String> {
+    let addresses = parse_bootstrap_input(raw)?;
+    if addresses.is_empty() {
+        return Err("Enter at least one bootstrap multiaddress.".to_owned());
+    }
+    let sender = command_sender_store().lock()
+        .map_err(|_| "MESHX network command queue is unavailable".to_owned())?
+        .clone()
+        .ok_or_else(|| "Start the MESHX network before adding bootstrap peers.".to_owned())?;
+    let count = addresses.len();
+    sender.send(TransportCommand::AddBootstrapPeers(addresses))
+        .map_err(|_| "MESHX network thread is not accepting commands.".to_owned())?;
+    Ok(format!("MESHX: {count} bootstrap peer(s) queued. Connection and DHT status will update below."))
+}
+
 fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
     let keypair = libp2p::identity::Keypair::from_protobuf_encoding(identity_bytes)
         .map_err(|error| format!("MESHX saved transport identity is invalid: {error}"))?;
@@ -43,6 +79,13 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
     let peer_id = keypair.public().to_peer_id();
     let peer_label = peer_id.to_string();
     let thread_peer_label = peer_label.clone();
+    let (command_sender, mut command_receiver) = tokio::sync::mpsc::unbounded_channel();
+    if let Ok(mut stored_sender) = command_sender_store().lock() {
+        *stored_sender = Some(command_sender);
+    } else {
+        STARTED.store(false, Ordering::SeqCst);
+        return Err("MESHX network command queue could not be initialized".to_owned());
+    }
 
     let spawn_result = thread::Builder::new()
         .name("meshx-libp2p".to_owned())
@@ -109,26 +152,74 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
                 ));
 
                 loop {
-                    match swarm.select_next_some().await {
-                        SwarmEvent::NewListenAddr { address, .. } => {
-                            set_status(format!(
-                                "MESHX libp2p TCP listener active; peer id {thread_peer_label}; address {address}"
-                            ));
+                    tokio::select! {
+                        event = swarm.select_next_some() => {
+                            match event {
+                                SwarmEvent::NewListenAddr { address, .. } => {
+                                    set_status(format!(
+                                        "MESHX libp2p TCP listener active; peer id {thread_peer_label}; address {address}"
+                                    ));
+                                }
+                                SwarmEvent::ListenerError { error, .. } => {
+                                    set_status(format!("MESHX listener error: {error}"));
+                                }
+                                SwarmEvent::ConnectionEstablished { peer_id, .. } => {
+                                    set_status(format!(
+                                        "MESHX libp2p connected to peer {peer_id}; local peer id {thread_peer_label}"
+                                    ));
+                                }
+                                SwarmEvent::ConnectionClosed { peer_id, .. } => {
+                                    set_status(format!(
+                                        "MESHX peer disconnected: {peer_id}; local peer id {thread_peer_label}"
+                                    ));
+                                }
+                                SwarmEvent::Behaviour(meshx_libp2p_transport_spike::MeshxEvent::Kad(event)) => {
+                                    set_status(format!(
+                                        "MESHX DHT discovery event: {event:?}; local peer id {thread_peer_label}"
+                                    ));
+                                }
+                                SwarmEvent::Behaviour(meshx_libp2p_transport_spike::MeshxEvent::Delivery(_)) => {
+                                    set_status(format!("MESHX delivery transport event; local peer id {thread_peer_label}"));
+                                }
+                                _ => {}
+                            }
                         }
-                        SwarmEvent::ListenerError { error, .. } => {
-                            set_status(format!("MESHX listener error: {error}"));
+                        command = command_receiver.recv() => {
+                            match command {
+                                Some(TransportCommand::AddBootstrapPeers(addresses)) => {
+                                    let address_refs: Vec<&str> = addresses.iter().map(String::as_str).collect();
+                                    match meshx_libp2p_transport_spike::parse_bootstrap_peers(&address_refs) {
+                                        Ok(peers) => {
+                                            let dial_results = meshx_libp2p_transport_spike::dial_bootstrap_peers(
+                                                &mut swarm,
+                                                &peers,
+                                            );
+                                            let dial_queued = dial_results.iter().filter(|result| result.is_ok()).count();
+                                            let dht_peers_added = meshx_libp2p_transport_spike::add_dht_bootstrap_peers(
+                                                &mut swarm.behaviour_mut().kad,
+                                                &peers,
+                                            );
+                                            let bootstrap_result = meshx_libp2p_transport_spike::start_dht_bootstrap(
+                                                &mut swarm.behaviour_mut().kad,
+                                            );
+                                            match bootstrap_result {
+                                                Ok(query_id) => set_status(format!(
+                                                    "MESHX bootstrap configured: {} peer(s), {dial_queued} dial(s) queued, {dht_peers_added} DHT address(es); bootstrap query {query_id:?}; local peer id {thread_peer_label}",
+                                                    peers.len()
+                                                )),
+                                                Err(error) => set_status(format!(
+                                                    "MESHX bootstrap peers added ({dht_peers_added}) but DHT bootstrap could not start: {error:?}; local peer id {thread_peer_label}"
+                                                )),
+                                            }
+                                        }
+                                        Err(error) => set_status(format!(
+                                            "MESHX rejected bootstrap list: {error:?}; local peer id {thread_peer_label}"
+                                        )),
+                                    }
+                                }
+                                None => break,
+                            }
                         }
-                        SwarmEvent::ConnectionEstablished { peer_id, .. } => {
-                            set_status(format!(
-                                "MESHX libp2p connected to peer {peer_id}; local peer id {thread_peer_label}"
-                            ));
-                        }
-                        SwarmEvent::ConnectionClosed { peer_id, .. } => {
-                            set_status(format!(
-                                "MESHX peer disconnected: {peer_id}; local peer id {thread_peer_label}"
-                            ));
-                        }
-                        _ => {}
                     }
                 }
             });
@@ -144,6 +235,9 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
         }
         Err(error) => {
             STARTED.store(false, Ordering::SeqCst);
+            if let Ok(mut stored_sender) = command_sender_store().lock() {
+                *stored_sender = None;
+            }
             let message = format!("MESHX thread start failed: {error}");
             set_status(message.clone());
             Err(message)
@@ -164,6 +258,21 @@ pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeTransportStatus(
     _this: JObject,
 ) -> jstring {
     jni_string(&mut env, current_status())
+}
+
+/// Kotlin: NativeMeshx.nativeAddBootstrapPeers(addresses: String)
+#[no_mangle]
+pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeAddBootstrapPeers(
+    mut env: JNIEnv,
+    _this: JObject,
+    raw_addresses: JString,
+) -> jstring {
+    let result = match env.get_string(&raw_addresses) {
+        Ok(value) => queue_bootstrap_peers(&value.to_string_lossy())
+            .unwrap_or_else(|error| format!("MESHX bootstrap error: {error}")),
+        Err(error) => format!("MESHX bootstrap list could not be read from Android: {error}"),
+    };
+    jni_string(&mut env, result)
 }
 
 /// Kotlin: NativeMeshx.nativeGenerateIdentity()
@@ -212,6 +321,29 @@ mod tests {
     #[test]
     fn invalid_persisted_identity_is_rejected() {
         assert!(libp2p::identity::Keypair::from_protobuf_encoding(b"not a key").is_err());
+    }
+
+    #[test]
+    fn bootstrap_input_trims_lines_and_preserves_peer_ids() {
+        let peer = libp2p::identity::Keypair::generate_ed25519().public().to_peer_id();
+        let address = format!("/ip4/127.0.0.1/tcp/4001/p2p/{peer}");
+        let input = format!("  {address}  \n\n");
+        let parsed = parse_bootstrap_input(&input).expect("valid bootstrap peer");
+        assert_eq!(parsed, vec![address]);
+    }
+
+    #[test]
+    fn bootstrap_input_rejects_addresses_without_peer_ids() {
+        assert!(parse_bootstrap_input("/ip4/127.0.0.1/tcp/4001").is_err());
+    }
+
+    #[test]
+    fn bootstrap_input_rejects_more_than_thirty_two_peers() {
+        let addresses: Vec<String> = (0..33).map(|_| {
+            let peer = libp2p::identity::Keypair::generate_ed25519().public().to_peer_id();
+            format!("/ip4/127.0.0.1/tcp/4001/p2p/{peer}")
+        }).collect();
+        assert!(parse_bootstrap_input(&addresses.join("\n")).is_err());
     }
 
     #[test]
