@@ -8,7 +8,7 @@ Nearby offline communication is an additional capability, not the primary archit
 
 ## Global-first network
 
-- **Identity:** locally generated cryptographic identity; no phone number or email required. Contacts can be added by sharing a QR code or public identity link.
+- **Identity:** locally generated cryptographic identity; no phone number or email required. The Android prototype now uses a signed MESHX2 QR to bind its Android Keystore EC identity to a libp2p Ed25519 transport public key and derived Peer ID. MESHX2 verifies key binding, not a person's real-world identity; contacts must still compare fingerprints through a trusted channel.
 - **End-to-end messaging:** use a maintained, independently reviewed encryption protocol/library. Only the intended recipient devices can decrypt message content.
 - **Peer discovery:** use a distributed, replaceable discovery/rendezvous design so users can find peers without one permanent central directory. Bootstrap services may help new devices join, but must be replaceable and independently operated.
 - **Internet transport:** connect peers directly when possible. When direct connectivity is blocked by NAT, firewalls, or devices being offline, use optional independently operated relay nodes that forward ciphertext only.
