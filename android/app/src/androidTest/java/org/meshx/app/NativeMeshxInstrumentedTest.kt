@@ -41,6 +41,24 @@ class NativeMeshxInstrumentedTest {
     }
 
     @Test
+    fun contactTransportKeyChangesRequireExplicitConfirmationAndDowngradesAreBlocked() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val prefs = context.getSharedPreferences("meshx_local_contacts", android.content.Context.MODE_PRIVATE)
+        val identity = loadOrCreateIdentity(prefs)
+        val signed = parsePublicIdentity(identity.qrPayload)
+        val changedTransport = signed.copy(transportPeerId = "12D3KooWChangedTransportPeerIdForTest")
+        assertEquals(ContactImportDecision.SAME_IDENTITY, classifyParsedContactImport(signed, signed))
+        assertEquals(ContactImportDecision.TRANSPORT_KEY_CHANGED, classifyParsedContactImport(signed, changedTransport))
+
+        val jsonBytes = Base64.decode(identity.qrPayload.removePrefix("MESHX2:"), Base64.DEFAULT)
+        val json = JSONObject(String(jsonBytes, Charsets.UTF_8))
+        val identityPublicKey = Base64.decode(json.getString("identity_public_key"), Base64.DEFAULT)
+        val legacy = parsePublicIdentity("MESHX1:" + Base64.encodeToString(identityPublicKey, Base64.NO_WRAP))
+        assertEquals(ContactImportDecision.UPGRADE_LEGACY, classifyParsedContactImport(legacy, signed))
+        assertEquals(ContactImportDecision.SIGNED_BINDING_DOWNGRADE, classifyParsedContactImport(signed, legacy))
+    }
+
+    @Test
     fun signedMESHX2QrBindsIdentityKeyToTransportPeerAndRejectsTampering() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val prefs = context.getSharedPreferences("meshx_local_contacts", android.content.Context.MODE_PRIVATE)
