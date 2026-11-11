@@ -11,7 +11,7 @@ The Android prototype currently supports:
 - The libp2p transport private key is encrypted with an Android Keystore AES-GCM key; Android emulator CI verifies that the same Peer ID survives app force-stop and relaunch.
 - Android emulator CI verifies the native TCP/Noise/Yamux listener starts without an app crash.
 - User-configurable, bounded bootstrap multiaddresses are wired through Kotlin/JNI to outbound dial requests and Kademlia bootstrap initiation. This is configuration and startup wiring, not proof that a public bootstrap node is reachable.
-- Public identity QR generation and contact import.
+- Signed MESHX2 QR binding the Android Keystore EC identity to the libp2p Ed25519 transport public key; import verifies the signature and derived Peer ID, and Android emulator CI rejects a tampered binding. Legacy MESHX1 import remains available without a transport-key binding.
 - A local-only chat prototype; messages do not reach another device.
 - Local prototype chat records encrypted at rest using an Android Keystore AES-GCM key.
 - An isolated OpenMLS evaluation with passing tests for two-member message encryption, ciphertext tampering, replay rejection, and non-member rejection.
@@ -21,7 +21,7 @@ The Android prototype currently supports:
 
 The OpenMLS/SQLite spike is not integrated into the Android app. Its test database uses ordinary, unencrypted SQLite and is only a temporary CI fixture. It is not safe for real user data. The libp2p queue is volatile in-memory prototype code, not durable relay storage.
 
-**Not implemented or not yet verified:** real cross-network message delivery, successful discovery through a reachable public bootstrap node, independent relays, durable offline store-and-forward, production end-to-end encrypted chats, encrypted media, Bluetooth/Wi-Fi Direct delivery, recovery phrase, encrypted backup, and iPhone app.
+**Not implemented or not yet verified:** identity-change warnings and transport-key rotation confirmation, successful discovery through a reachable public bootstrap node, real cross-network message delivery, independent relays, durable offline store-and-forward, production end-to-end encrypted chats, encrypted media, Bluetooth/Wi-Fi Direct delivery, recovery phrase, encrypted backup, and iPhone app.
 
 ## Product principles
 
@@ -45,6 +45,7 @@ The planned recovery approach is a user-held 12- or 24-word recovery phrase, wit
 - `docs/ARCHITECTURE.md` — architecture and security boundaries.
 - `docs/ROADMAP.md` — staged implementation plan.
 - `docs/SECURITY_MODEL.md` — current protections, limitations, and release gates.
+- `docs/IDENTITY_FORMAT.md` — MESHX1 legacy and signed MESHX2 QR format.
 - `docs/TRANSPORT_DECISION.md` — Rust libp2p global transport evaluation and test gates.
 - `.github/workflows/` — cloud Android and Rust spike checks.
 
