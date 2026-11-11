@@ -19,6 +19,7 @@ internal object NativeMeshx {
     private external fun nativeGenerateIdentity(): ByteArray
     private external fun nativeTransportPublicKey(identity: ByteArray): ByteArray
     private external fun nativeTransportPeerId(publicKey: ByteArray): String
+    private external fun nativeFindPeer(peerId: String): String
     private external fun nativeStartTransport(identity: ByteArray): String
     private external fun nativeAddBootstrapPeers(addresses: String): String
 
@@ -53,6 +54,14 @@ internal object NativeMeshx {
         } catch (error: UnsatisfiedLinkError) {
             throw IllegalStateException("Native peer-ID method unavailable: ${error.message ?: "unknown JNI error"}", error)
         }
+    }
+
+    fun findPeer(peerId: String): String = loadError?.let {
+        "MESHX peer discovery error: Native bridge unavailable: $it"
+    } ?: try {
+        nativeFindPeer(peerId)
+    } catch (error: UnsatisfiedLinkError) {
+        "MESHX peer discovery error: Native method unavailable: ${error.message ?: "unknown JNI error"}"
     }
 
     fun start(identity: ByteArray): String = loadError?.let {
