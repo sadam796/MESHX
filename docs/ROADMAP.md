@@ -11,15 +11,16 @@ A planned feature is not implemented until it has working tests on the intended 
 ## Stage 1 — local identity and safe foundations
 - [x] Generate a device-local EC identity using Android Keystore (prototype identity only).
 - [x] Persist the separate libp2p Ed25519 transport identity encrypted with Android Keystore AES-GCM; emulator CI confirms the Peer ID remains identical after app force-stop and relaunch.
-- [x] Add public identity QR generation and contact import.
+- [x] Add signed MESHX2 QR binding the Android Keystore EC identity to the libp2p Ed25519 transport key; verify the signature and derived Peer ID on import, with Android emulator tamper-rejection coverage.
+- [x] Preserve legacy MESHX1 contact import without treating it as a signed transport binding.
 - [x] Add a local-only chat prototype.
 - [x] Encrypt local prototype chat records at rest with an Android Keystore AES-GCM key.
 - [x] Evaluate OpenMLS in an isolated Rust spike; host tests cover two-party encrypted messages, tampering, replay, and non-member rejection.
 - [x] Prove OpenMLS group-state persistence and replay rejection across provider/database reopen in a host-only SQLite test.
 - [x] Compile the OpenMLS SQLite provider and persistence test code for Android ARM64 in CI.
 - [ ] Select and implement encrypted persistent MLS storage suitable for Android.
-- [x] Add interim 128-bit contact fingerprint display and manual verification marker (not protocol authentication).
-- [ ] Replace interim marker with protocol-authenticated verification and identity-change warnings.
+- [x] Add 128-bit contact fingerprint display and manual out-of-band comparison marker.
+- [ ] Add identity-change warnings and explicit transport-key rotation confirmation.
 - [ ] Do not add phone-number or email registration.
 
 ## Stage 2 — first worldwide Internet messaging prototype
@@ -32,7 +33,7 @@ A planned feature is not implemented until it has working tests on the intended 
 - [x] Wire bounded user-configurable bootstrap multiaddresses through the Android UI/JNI to outbound dial requests and Kademlia bootstrap initiation (live peer reachability is not yet verified).
 - [ ] Integrate the reviewed MLS/session layer into the Android app.
 - [ ] Verify native libp2p Swarm startup on a physical ARM64 Android device. Current code starts a TCP/Noise/Yamux listener; it does not yet discover peers or send app messages.
-- [ ] Bind the app's human identity to protocol credentials with authenticated contact verification and identity-change warnings.
+- [ ] Bind MESHX2 contact identities to MLS protocol credentials and authenticate identity changes in the messaging session.
 - [ ] Add authenticated delivery receipts, bounded retry, and durable message status.
 - [ ] Test between two phones on different networks, not only on the same Wi-Fi (deferred until code-side readiness).
 - [ ] Document what bootstrap, STUN, or relay infrastructure can observe.
