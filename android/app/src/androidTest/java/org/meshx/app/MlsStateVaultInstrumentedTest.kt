@@ -1,20 +1,16 @@
 package org.meshx.app
 
-import android.content.Context
-import android.util.Base64
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class MlsStateVaultInstrumentedTest {
-    private val context: Context
+    private val context
         get() = InstrumentationRegistry.getInstrumentation().targetContext
 
     @Test
@@ -25,22 +21,19 @@ class MlsStateVaultInstrumentedTest {
 
         vault.save(groupId, state)
 
-        val preferences = context.getSharedPreferences(
-            "meshx_mls_encrypted_state_v1",
-            Context.MODE_PRIVATE
-        )
-        val stored = preferences.getString(vault.storageKeyForTesting(groupId), null)
-        assertNotNull("Encrypted MLS record should be persisted", stored)
-        val storedValue = stored ?: error("Encrypted MLS record missing")
-        assertTrue("Stored record must use the versioned encrypted format", storedValue.startsWith("MESHXMLS1:"))
+        val file = vault.fileForTesting(groupId)
+        assertTrue("Encrypted MLS snapshot should be persisted", file.isFile)
+        val stored = file.readBytes()
+        assertTrue("Stored record must use the versioned encrypted format",
+            String(stored.copyOfRange(0, "MESHXMLS1:".length), Charsets.US_ASCII) == "MESHXMLS1:")
         assertFalse(
-            "Raw serialized MLS state must not appear in preferences",
-            storedValue.contains(Base64.encodeToString(state, Base64.NO_WRAP))
+            "Raw serialized MLS state must not appear in the file",
+            stored.toList().windowed(state.size).any { window -> window == state.toList() }
         )
         assertArrayEquals("A fresh vault instance must restore the exact snapshot", state, MlsStateVault(context).load(groupId))
 
         vault.delete(groupId)
-        assertNull("Deleted MLS state should no longer be present", vault.load(groupId))
+        assertFalse("Deleted MLS state file should no longer exist", file.exists())
     }
 
     @Test
@@ -49,16 +42,11 @@ class MlsStateVaultInstrumentedTest {
         val vault = MlsStateVault(context)
         vault.save(groupId, "sensitive MLS group state".toByteArray(Charsets.UTF_8))
 
-        val preferences = context.getSharedPreferences(
-            "meshx_mls_encrypted_state_v1",
-            Context.MODE_PRIVATE
-        )
-        val key = vault.storageKeyForTesting(groupId)
-        val original = preferences.getString(key, null)!!
-        val bytes = Base64.decode(original.removePrefix("MESHXMLS1:"), Base64.DEFAULT)
-        bytes[bytes.lastIndex] = (bytes.last().toInt() xor 0x01).toByte()
-        val tampered = "MESHXMLS1:" + Base64.encodeToString(bytes, Base64.NO_WRAP)
-        assertTrue(preferences.edit().putString(key, tampered).commit())
+        val file = vault.fileForTesting(groupId)
+        val original = file.readBytes()
+        val tampered = original.copyOf()
+        tampered[tampered.lastIndex] = (tampered.last().toInt() xor 0x01).toByte()
+        file.writeBytes(tampered)
 
         var rejected = false
         try {
@@ -67,7 +55,8 @@ class MlsStateVaultInstrumentedTest {
             rejected = true
         }
         assertTrue("AES-GCM authentication must reject a modified snapshot", rejected)
-        assertTrue("The failed read must not overwrite or erase the tampered record", preferences.getString(key, null) == tampered)
+        assertArrayEquals("A failed read must not overwrite or erase the tampered record", tampered, file.readBytes())
+        vault.delete(groupId)
     }
 
     @Test
@@ -80,7 +69,10 @@ class MlsStateVaultInstrumentedTest {
         vault.save(firstGroup, state)
 
         assertArrayEquals(state, vault.load(firstGroup))
-        assertNull("A different group ID must not read another group's snapshot", vault.load(secondGroup))
+        assertTrue("Different group IDs must map to separate records",
+            vault.fileForTesting(firstGroup) != vault.fileForTesting(secondGroup))
+        assertTrue("The second group must not have a stored snapshot",
+            !vault.fileForTesting(secondGroup).exists())
         vault.delete(firstGroup)
     }
 }
