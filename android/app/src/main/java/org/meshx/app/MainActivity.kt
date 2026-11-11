@@ -184,6 +184,18 @@ internal data class ParsedPublicIdentity(
     val authenticatedBinding: Boolean
 )
 
+internal enum class ContactImportDecision { ADD, SAME_IDENTITY, UPGRADE_LEGACY, TRANSPORT_KEY_CHANGED, SIGNED_BINDING_DOWNGRADE }
+internal data class PendingContactTransportRotation(val rawPayload: String, val parsed: ParsedPublicIdentity)
+internal fun classifyContactImport(existingPayloads: Set<String>, incoming: ParsedPublicIdentity): ContactImportDecision {
+    val existing = existingPayloads.asSequence().mapNotNull { raw ->
+        try { parsePublicIdentity(raw) } catch (_: Exception) { null }
+    }.firstOrNull { it.fingerprint == incoming.fingerprint } ?: return ContactImportDecision.ADD
+    if (existing.authenticatedBinding && !incoming.authenticatedBinding) return ContactImportDecision.SIGNED_BINDING_DOWNGRADE
+    if (existing.transportPeerId != null && incoming.transportPeerId != null && existing.transportPeerId != incoming.transportPeerId) return ContactImportDecision.TRANSPORT_KEY_CHANGED
+    if (!existing.authenticatedBinding && incoming.authenticatedBinding) return ContactImportDecision.UPGRADE_LEGACY
+    return ContactImportDecision.SAME_IDENTITY
+}
+
 private fun fingerprint(publicKey: ByteArray): String {
     val digest = MessageDigest.getInstance("SHA-256").digest(publicKey)
     return digest.take(16).joinToString("") { "%02X".format(it) }.chunked(4).joinToString("-")
@@ -321,11 +333,27 @@ private fun MeshxHome() {
     var verifiedContacts by remember {
         mutableStateOf(prefs.getStringSet("verified_contacts", emptySet())?.toSet() ?: emptySet())
     }
+    var pendingTransportRotation by remember { mutableStateOf<PendingContactTransportRotation?>(null) }
     var status by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var selectedChat by remember { mutableStateOf<String?>(null) }
     var messageDraft by remember { mutableStateOf("") }
     var localMessages by remember { mutableStateOf(loadLocalMessages(prefs)) }
+    val persistContactIdentity: (String, ParsedPublicIdentity) -> Unit = { raw, parsed ->
+        val id = parsed.fingerprint
+        val updated = (contacts + id).distinct()
+        val updatedKeys = contactPublicKeys.filterNot { existing ->
+            try { parsePublicIdentity(existing).fingerprint == id } catch (_: Exception) { false }
+        }.toSet() + raw
+        val updatedTransportPeers = contactTransportPeers.filterNot { it.startsWith("$id#") }.toMutableSet().apply {
+            parsed.transportPeerId?.let { add("$id#$it") }
+        }.toSet()
+        check(prefs.edit().putStringSet("contacts", updated.toSet()).putStringSet("contact_public_keys", updatedKeys)
+            .putStringSet("contact_transport_peers", updatedTransportPeers).commit()) { "Contact identity could not be saved." }
+        contacts = updated
+        contactPublicKeys = updatedKeys
+        contactTransportPeers = updatedTransportPeers
+    }
     val qrImagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             try {
@@ -401,28 +429,27 @@ private fun MeshxHome() {
                     try {
                         val raw = importText.trim()
                         val parsed = parsePublicIdentity(raw)
-                        val id = parsed.fingerprint
-                        require(identity?.fingerprint != id) { "This is your own identity." }
-                        val updated = (contacts + id).distinct()
-                        val updatedKeys = contactPublicKeys + raw
-                        val updatedTransportPeers = parsed.transportPeerId?.let {
-                            contactTransportPeers + "$id#$it"
-                        } ?: contactTransportPeers
-                        prefs.edit()
-                            .putStringSet("contacts", updated.toSet())
-                            .putStringSet("contact_public_keys", updatedKeys)
-                            .putStringSet("contact_transport_peers", updatedTransportPeers)
-                            .apply()
-                        contacts = updated
-                        contactPublicKeys = updatedKeys
-                        contactTransportPeers = updatedTransportPeers
-                        importText = ""
-                        status = if (parsed.authenticatedBinding) {
-                            "Signed MESHX2 identity and transport binding verified: $id"
-                        } else {
-                            "Legacy MESHX1 identity added: $id. No signed transport binding is present."
+                        require(identity?.fingerprint != parsed.fingerprint) { "This is your own identity." }
+                        when (classifyContactImport(contactPublicKeys, parsed)) {
+                            ContactImportDecision.TRANSPORT_KEY_CHANGED -> {
+                                pendingTransportRotation = PendingContactTransportRotation(raw, parsed)
+                                status = null
+                                error = "SECURITY WARNING: Contact ki signed transport key badli hai. Confirm se pehle fingerprint trusted channel par dobara compare karein."
+                            }
+                            ContactImportDecision.SIGNED_BINDING_DOWNGRADE ->
+                                throw IllegalArgumentException("Signed MESHX2 contact ko unsigned MESHX1 par downgrade nahi kar sakte.")
+                            ContactImportDecision.SAME_IDENTITY -> {
+                                status = "Yeh contact pehle se saved hai. Koi key change nahi hua."
+                                error = null
+                            }
+                            ContactImportDecision.ADD, ContactImportDecision.UPGRADE_LEGACY -> {
+                                persistContactIdentity(raw, parsed)
+                                status = if (parsed.authenticatedBinding) "Signed MESHX2 identity saved: ${parsed.fingerprint}"
+                                    else "Legacy MESHX1 identity added: ${parsed.fingerprint}. Transport binding nahi hai."
+                                importText = ""
+                                error = null
+                            }
                         }
-                        error = null
                     } catch (e: Exception) {
                         error = e.localizedMessage ?: "Invalid public identity."
                         status = null
@@ -430,6 +457,30 @@ private fun MeshxHome() {
                 }) { Text("Add contact") }
                 status?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                pendingTransportRotation?.let { pending ->
+                    Card(Modifier.fillMaxWidth().padding(top = 10.dp)) {
+                        Column(Modifier.padding(16.dp)) {
+                            Text("Transport key change detected", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.error)
+                            Text("Identity fingerprint same hai, lekin signed transport Peer ID badal gaya. Yeh legitimate device migration bhi ho sakta hai aur account takeover bhi. Purani key bina confirm replace nahi hogi.")
+                            Text("New Peer ID: ${pending.parsed.transportPeerId ?: "Unavailable"}", style = MaterialTheme.typography.bodySmall)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(onClick = {
+                                    persistContactIdentity(pending.rawPayload, pending.parsed)
+                                    pendingTransportRotation = null
+                                    importText = ""
+                                    error = null
+                                    status = "Transport key replacement explicitly accepted. Fingerprint independently verify karein."
+                                }) { Text("Confirm key change") }
+                                TextButton(onClick = {
+                                    pendingTransportRotation = null
+                                    importText = ""
+                                    error = null
+                                    status = "Key change rejected. Saved contact key unchanged."
+                                }) { Text("Reject") }
+                            }
+                        }
+                    }
+                }
 
                 Spacer(Modifier.height(16.dp))
                 Text("Saved contacts (" + contacts.size + ")", style = MaterialTheme.typography.titleMedium)
