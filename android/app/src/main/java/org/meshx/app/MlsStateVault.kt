@@ -3,7 +3,9 @@ package org.meshx.app
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
-import android.util.Base64
+import android.system.Os
+import java.io.File
+import java.io.FileOutputStream
 import java.security.KeyStore
 import java.security.MessageDigest
 import javax.crypto.AEADBadTagException
@@ -16,13 +18,10 @@ import javax.crypto.spec.GCMParameterSpec
  * Android-side encrypted persistence boundary for future OpenMLS group snapshots.
  *
  * The Rust MLS engine must pass opaque serialized state bytes through this vault;
- * plaintext MLS state must never be written to SharedPreferences or SQLite.
+ * plaintext MLS state must never be written to disk.
  */
 internal class MlsStateVault(context: Context) {
-    private val preferences = context.applicationContext.getSharedPreferences(
-        PREFERENCES_NAME,
-        Context.MODE_PRIVATE
-    )
+    private val directory = File(context.applicationContext.filesDir, DIRECTORY_NAME)
 
     fun save(groupId: String, state: ByteArray) {
         validateGroupId(groupId)
@@ -33,33 +32,44 @@ internal class MlsStateVault(context: Context) {
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
         cipher.updateAAD(associatedData(groupId))
         val ciphertext = cipher.doFinal(state)
-        val encoded = FORMAT_PREFIX + Base64.encodeToString(cipher.iv + ciphertext, Base64.NO_WRAP)
-        check(preferences.edit().putString(storageKey(groupId), encoded).commit()) {
-            "Encrypted MLS state could not be saved."
+        val record = FORMAT_PREFIX + cipher.iv + ciphertext
+
+        ensureDirectory()
+        val destination = fileFor(groupId)
+        val temporary = File(directory, destination.name + "." + java.util.UUID.randomUUID() + ".tmp")
+        try {
+            FileOutputStream(temporary).use { output ->
+                output.write(record)
+                output.fd.sync()
+            }
+            // Atomic replacement keeps the previous complete snapshot if writing fails.
+            Os.rename(temporary.absolutePath, destination.absolutePath)
+        } catch (error: Exception) {
+            temporary.delete()
+            throw IllegalStateException("Encrypted MLS state could not be saved.", error)
         }
     }
 
     fun load(groupId: String): ByteArray? {
         validateGroupId(groupId)
-        val encoded = preferences.getString(storageKey(groupId), null) ?: return null
-        require(encoded.startsWith(FORMAT_PREFIX)) {
+        val file = fileFor(groupId)
+        if (!file.exists()) return null
+        val maximumRecordBytes = FORMAT_PREFIX.size + GCM_IV_BYTES + GCM_TAG_BYTES + MAX_STATE_BYTES
+        require(file.length() in (FORMAT_PREFIX.size + GCM_IV_BYTES + GCM_TAG_BYTES + 1).toLong()..maximumRecordBytes.toLong()) {
+            "Saved MLS state has an invalid size; it was kept unchanged."
+        }
+        val record = file.readBytes()
+        require(record.copyOfRange(0, FORMAT_PREFIX.size).contentEquals(FORMAT_PREFIX)) {
             "Saved MLS state has an unknown format; it was kept unchanged."
-        }
-        val combined = try {
-            Base64.decode(encoded.removePrefix(FORMAT_PREFIX), Base64.DEFAULT)
-        } catch (error: IllegalArgumentException) {
-            throw IllegalStateException("Saved MLS state is malformed; it was kept unchanged.", error)
-        }
-        require(combined.size > GCM_IV_BYTES + GCM_TAG_BYTES) {
-            "Saved MLS state is incomplete; it was kept unchanged."
         }
 
         val key = getExistingKey()
             ?: throw IllegalStateException(
                 "The Android Keystore key for saved MLS state is missing. Data was kept unchanged."
             )
-        val iv = combined.copyOfRange(0, GCM_IV_BYTES)
-        val ciphertext = combined.copyOfRange(GCM_IV_BYTES, combined.size)
+        val ivStart = FORMAT_PREFIX.size
+        val iv = record.copyOfRange(ivStart, ivStart + GCM_IV_BYTES)
+        val ciphertext = record.copyOfRange(ivStart + GCM_IV_BYTES, record.size)
         return try {
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_BITS, iv))
@@ -77,12 +87,17 @@ internal class MlsStateVault(context: Context) {
 
     fun delete(groupId: String) {
         validateGroupId(groupId)
-        check(preferences.edit().remove(storageKey(groupId)).commit()) {
-            "Encrypted MLS state could not be deleted."
-        }
+        val file = fileFor(groupId)
+        check(!file.exists() || file.delete()) { "Encrypted MLS state could not be deleted." }
     }
 
-    internal fun storageKeyForTesting(groupId: String): String = storageKey(groupId)
+    internal fun fileForTesting(groupId: String): File = fileFor(groupId)
+
+    private fun ensureDirectory() {
+        check(directory.isDirectory || directory.mkdirs()) {
+            "Private MESHX MLS storage directory could not be created."
+        }
+    }
 
     private fun getExistingKey(): SecretKey? {
         val store = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
@@ -107,12 +122,13 @@ internal class MlsStateVault(context: Context) {
     }
 
     private fun associatedData(groupId: String): ByteArray =
-        "$FORMAT_PREFIX$groupId".toByteArray(Charsets.UTF_8)
+        FORMAT_PREFIX + groupId.toByteArray(Charsets.UTF_8)
 
-    private fun storageKey(groupId: String): String {
+    private fun fileFor(groupId: String): File {
         val digest = MessageDigest.getInstance("SHA-256")
             .digest(groupId.toByteArray(Charsets.UTF_8))
-        return "group_" + digest.joinToString("") { "%02x".format(it) }
+        val name = digest.joinToString("") { "%02x".format(it.toInt() and 0xff) } + ".mls"
+        return File(directory, name)
     }
 
     private fun validateGroupId(groupId: String) {
@@ -122,11 +138,11 @@ internal class MlsStateVault(context: Context) {
     }
 
     private companion object {
-        const val PREFERENCES_NAME = "meshx_mls_encrypted_state_v1"
+        val FORMAT_PREFIX = "MESHXMLS1:".toByteArray(Charsets.US_ASCII)
+        const val DIRECTORY_NAME = "meshx_mls_state_v1"
         const val KEY_ALIAS = "meshx_mls_state_aes_v1"
         const val ANDROID_KEYSTORE = "AndroidKeyStore"
         const val TRANSFORMATION = "AES/GCM/NoPadding"
-        const val FORMAT_PREFIX = "MESHXMLS1:"
         const val GCM_IV_BYTES = 12
         const val GCM_TAG_BITS = 128
         const val GCM_TAG_BYTES = 16
