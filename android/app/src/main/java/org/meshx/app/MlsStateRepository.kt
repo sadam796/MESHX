@@ -27,5 +27,26 @@ internal class MlsStateRepository(context: Context) {
         }
     }
 
+
+    /** Creates an RFC 9420 group and immediately encrypts its state at rest. */
+    fun createAndSaveGroupState(recordId: String, credentialIdentity: ByteArray) {
+        val snapshot = NativeMeshx.createMlsGroupSnapshot(credentialIdentity)
+        try {
+            vault.save(recordId, snapshot)
+        } finally {
+            snapshot.fill(0)
+        }
+    }
+
+    /** Loads the encrypted group state and verifies the native OpenMLS group. */
+    fun restoreAndValidateGroupState(recordId: String): Boolean {
+        val snapshot = vault.load(recordId) ?: return false
+        return try {
+            NativeMeshx.validateMlsGroupSnapshot(snapshot)
+        } finally {
+            snapshot.fill(0)
+        }
+    }
+
     fun delete(recordId: String) = vault.delete(recordId)
 }
