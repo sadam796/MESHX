@@ -7,8 +7,10 @@ use std::{
     thread,
 };
 
+mod mls_snapshot;
+
 use futures::StreamExt;
-use jni::{objects::{JByteArray, JObject, JString}, sys::{jbyteArray, jstring}, JNIEnv};
+use jni::{objects::{JByteArray, JObject, JString}, sys::{jboolean, jbyteArray, jstring, JNI_FALSE, JNI_TRUE}, JNIEnv};
 use libp2p::{swarm::SwarmEvent, tcp, yamux, Multiaddr, SwarmBuilder};
 
 enum TransportCommand {
@@ -363,6 +365,39 @@ pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeTransportPeerId(
         .map(|key| key.to_peer_id().to_string())
         .unwrap_or_default();
     jni_string(&mut env, result)
+}
+
+
+/// Kotlin: NativeMeshx.nativeMlsCreateSignerSnapshot()
+/// Returns serialized OpenMLS provider state; callers must encrypt it with MlsStateVault.
+#[no_mangle]
+pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeMlsCreateSignerSnapshot(
+    mut env: JNIEnv,
+    _this: JObject,
+) -> jbyteArray {
+    match mls_snapshot::create_signer_snapshot() {
+        Ok(bytes) => env.byte_array_from_slice(&bytes)
+            .map(|array| array.into_raw())
+            .unwrap_or(std::ptr::null_mut()),
+        Err(error) => {
+            set_status(format!("MESHX MLS snapshot error: {error}"));
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Kotlin: NativeMeshx.nativeMlsValidateSignerSnapshot(snapshot: ByteArray)
+/// Validates that the restored provider contains its original MLS private signer.
+#[no_mangle]
+pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeMlsValidateSignerSnapshot(
+    mut env: JNIEnv,
+    _this: JObject,
+    snapshot: JByteArray,
+) -> jboolean {
+    match env.convert_byte_array(&snapshot) {
+        Ok(bytes) if mls_snapshot::validate_signer_snapshot(&bytes).is_ok() => JNI_TRUE,
+        _ => JNI_FALSE,
+    }
 }
 
 /// Kotlin: NativeMeshx.nativeStartTransport(identity: ByteArray)
