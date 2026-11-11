@@ -2,7 +2,7 @@
 
 ## Status
 
-This is the Android persistence foundation for the future OpenMLS engine. It is **not** an OpenMLS `StorageProvider`, it does not create MLS groups, and it does not send or decrypt messages. The Rust OpenMLS spike remains separate until a tested provider/bridge is integrated.
+This is the Android persistence foundation for the OpenMLS engine. It is **not yet** an OpenMLS `StorageProvider` and is not wired to the Android JNI transport. A separate Rust spike now exercises a two-member RFC 9420 flow (create group, add member, Welcome join, encrypted application message, provider snapshot/restore, decrypt). That Rust test uses an in-memory provider and serialized snapshots; it does not call this Android vault or write plaintext snapshots to disk.
 
 ## Storage contract
 
@@ -29,7 +29,7 @@ App-private file: files/meshx_mls_state_v1/<SHA-256(groupId)>.mls
 
 ## Next integration work
 
-1. Implement an OpenMLS storage provider whose persisted values are encrypted by this boundary (or an equivalent authenticated encrypted database).
+1. Connect the Rust provider snapshot/restore boundary to this Android vault so the serialized OpenMLS provider store is encrypted before every disk write and authenticated before restore.
 2. Bind the MLS credential signing key to a deliberate MESHX identity model; the existing MESHX2 transport-key signature is not automatically an MLS credential.
-3. Add two-member create/join, Welcome, encrypt/decrypt, replay/tamper, non-member rejection, and restart/persistence tests.
+3. Extend the Rust two-member test with tamper/replay and non-member rejection, and add an Android restart test that exercises the real Rust-to-vault bridge.
 4. Only then connect MLS ciphertext to libp2p request/response delivery. Noise remains hop-by-hop transport security; MLS provides group end-to-end protection.
