@@ -24,6 +24,8 @@ internal object NativeMeshx {
     private external fun nativeAddBootstrapPeers(addresses: String): String
     private external fun nativeMlsCreateSignerSnapshot(): ByteArray
     private external fun nativeMlsValidateSignerSnapshot(snapshot: ByteArray): Boolean
+    private external fun nativeMlsCreateGroupSnapshot(identity: ByteArray): ByteArray
+    private external fun nativeMlsValidateGroupSnapshot(snapshot: ByteArray): Boolean
 
     fun generateIdentity(): ByteArray {
         check(loadError == null) { "Native bridge unavailable: $loadError" }
@@ -102,6 +104,29 @@ internal object NativeMeshx {
             nativeMlsValidateSignerSnapshot(snapshot)
         } catch (error: UnsatisfiedLinkError) {
             throw IllegalStateException("Native OpenMLS restore method unavailable: ${error.message ?: "unknown JNI error"}", error)
+        }
+    }
+
+
+    /** Creates a real RFC 9420 group snapshot for encrypted vault persistence. */
+    fun createMlsGroupSnapshot(identity: ByteArray): ByteArray {
+        check(loadError == null) { "Native bridge unavailable: $loadError" }
+        return try {
+            nativeMlsCreateGroupSnapshot(identity).also {
+                check(it.isNotEmpty()) { "Native OpenMLS group engine returned an empty snapshot." }
+            }
+        } catch (error: UnsatisfiedLinkError) {
+            throw IllegalStateException("Native OpenMLS group creation unavailable: ${error.message ?: "unknown JNI error"}", error)
+        }
+    }
+
+    /** Restores a group snapshot and validates its group plus private signer. */
+    fun validateMlsGroupSnapshot(snapshot: ByteArray): Boolean {
+        check(loadError == null) { "Native bridge unavailable: $loadError" }
+        return try {
+            nativeMlsValidateGroupSnapshot(snapshot)
+        } catch (error: UnsatisfiedLinkError) {
+            throw IllegalStateException("Native OpenMLS group restore unavailable: ${error.message ?: "unknown JNI error"}", error)
         }
     }
 
