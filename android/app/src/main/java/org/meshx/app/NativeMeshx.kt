@@ -18,6 +18,7 @@ internal object NativeMeshx {
     private external fun nativeTransportStatus(): String
     private external fun nativeGenerateIdentity(): ByteArray
     private external fun nativeStartTransport(identity: ByteArray): String
+    private external fun nativeAddBootstrapPeers(addresses: String): String
 
     fun generateIdentity(): ByteArray {
         check(loadError == null) { "Native bridge unavailable: $loadError" }
@@ -36,6 +37,14 @@ internal object NativeMeshx {
         nativeStartTransport(identity)
     } catch (error: UnsatisfiedLinkError) {
         "Native bridge method unavailable: ${error.message ?: "unknown JNI error"}"
+    }
+
+    fun addBootstrapPeers(addresses: String): String = loadError?.let {
+        "Native bridge unavailable: $it"
+    } ?: try {
+        nativeAddBootstrapPeers(addresses)
+    } catch (error: UnsatisfiedLinkError) {
+        "Native bootstrap method unavailable: ${error.message ?: "unknown JNI error"}"
     }
 
     fun status(): String {
