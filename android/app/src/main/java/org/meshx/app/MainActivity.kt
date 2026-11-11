@@ -207,6 +207,9 @@ private fun MeshxHome() {
     val prefs = remember { context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE) }
     var nativeTransportStatus by remember { mutableStateOf("Preparing secure MESHX identity…") }
     var nativeTransportReady by remember { mutableStateOf(false) }
+    var bootstrapAddresses by remember {
+        mutableStateOf(prefs.getString("bootstrap_peers", "") ?: "")
+    }
     LaunchedEffect(Unit) {
         try {
             val transportIdentity = loadOrCreateTransportIdentity(prefs)
@@ -214,6 +217,10 @@ private fun MeshxHome() {
             nativeTransportStatus = startResult
             nativeTransportReady = startResult.startsWith("MESHX libp2p swarm starting")
                 || startResult.contains("MESHX libp2p TCP listener active")
+            val savedBootstrapPeers = prefs.getString("bootstrap_peers", "") ?: ""
+            if (nativeTransportReady && savedBootstrapPeers.isNotBlank()) {
+                nativeTransportStatus = NativeMeshx.addBootstrapPeers(savedBootstrapPeers)
+            }
         } catch (error: Exception) {
             nativeTransportStatus = "MESHX transport identity error: ${error.localizedMessage ?: "secure identity unavailable"}"
             nativeTransportReady = false
@@ -436,9 +443,29 @@ private fun MeshxHome() {
                 }
 
                 Spacer(Modifier.height(24.dp))
-                Text("Messaging engine — in development", style = MaterialTheme.typography.titleMedium)
+                Text("Internet peer discovery", style = MaterialTheme.typography.titleMedium)
+                Text("Optional: add bootstrap node multiaddresses, one per line. These are network entry points, not contacts. You must use a live MESHX-compatible node operated by you or a trusted independent operator.")
+                OutlinedTextField(
+                    value = bootstrapAddresses,
+                    onValueChange = { bootstrapAddresses = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Bootstrap multiaddresses") },
+                    placeholder = { Text("/ip4/host/tcp/port/p2p/PeerID") },
+                    minLines = 2
+                )
+                Button(
+                    onClick = {
+                        prefs.edit().putString("bootstrap_peers", bootstrapAddresses.trim()).apply()
+                        status = NativeMeshx.addBootstrapPeers(bootstrapAddresses)
+                        error = if (status?.startsWith("MESHX bootstrap error:") == true) status else null
+                    },
+                    enabled = nativeTransportReady && bootstrapAddresses.isNotBlank()
+                ) { Text("Connect to bootstrap peers") }
                 Text(nativeTransportStatus, style = MaterialTheme.typography.bodySmall)
-                Text("Global Internet peer discovery, end-to-end encrypted delivery, media transfer, and nearby Bluetooth / Wi-Fi messaging are not connected yet.")
+                Text("A bootstrap address only starts peer discovery. It does not guarantee that another contact is reachable, that messages are delivered, or that a relay is available.")
+                Spacer(Modifier.height(8.dp))
+                Text("Messaging engine — in development", style = MaterialTheme.typography.titleMedium)
+                Text("Global end-to-end encrypted message delivery, durable relays, media transfer, and nearby Bluetooth / Wi-Fi messaging are not connected yet.")
                 Spacer(Modifier.height(12.dp))
                 Text("Contact public keys and fingerprints are stored locally for future secure session setup. No message is sent yet. Recovery phrase, encrypted backup and messaging transport are still to be built.", style = MaterialTheme.typography.bodySmall)
             }
