@@ -28,7 +28,7 @@ class MlsStateVaultInstrumentedTest {
             String(stored.copyOfRange(0, "MESHXMLS1:".length), Charsets.US_ASCII) == "MESHXMLS1:")
         assertFalse(
             "Raw serialized MLS state must not appear in the file",
-            stored.toList().windowed(state.size).any { window -> window == state.toList() }
+            String(stored, Charsets.ISO_8859_1).contains(String(state, Charsets.ISO_8859_1))
         )
         assertArrayEquals("A fresh vault instance must restore the exact snapshot", state, MlsStateVault(context).load(groupId))
 
