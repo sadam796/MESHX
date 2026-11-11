@@ -26,6 +26,7 @@ internal object NativeMeshx {
     private external fun nativeMlsValidateSignerSnapshot(snapshot: ByteArray): Boolean
     private external fun nativeMlsCreateGroupSnapshot(identity: ByteArray): ByteArray
     private external fun nativeMlsValidateGroupSnapshot(snapshot: ByteArray): Boolean
+    private external fun nativeMlsTwoMemberRoundTripSelfTest(): Boolean
 
     fun generateIdentity(): ByteArray {
         check(loadError == null) { "Native bridge unavailable: $loadError" }
@@ -127,6 +128,16 @@ internal object NativeMeshx {
             nativeMlsValidateGroupSnapshot(snapshot)
         } catch (error: UnsatisfiedLinkError) {
             throw IllegalStateException("Native OpenMLS group restore unavailable: ${error.message ?: "unknown JNI error"}", error)
+        }
+    }
+
+    /** Runs a real Alice/Bob MLS encrypted-message round trip inside native code. */
+    fun mlsTwoMemberRoundTripSelfTest(): Boolean {
+        check(loadError == null) { "Native bridge unavailable: $loadError" }
+        return try {
+            nativeMlsTwoMemberRoundTripSelfTest()
+        } catch (error: UnsatisfiedLinkError) {
+            throw IllegalStateException("Native MLS self-test unavailable: ${error.message ?: "unknown JNI error"}", error)
         }
     }
 
