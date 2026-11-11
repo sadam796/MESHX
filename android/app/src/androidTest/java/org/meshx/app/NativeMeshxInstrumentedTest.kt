@@ -41,6 +41,14 @@ class NativeMeshxInstrumentedTest {
     }
 
     @Test
+    fun nativeOpenMlsCreatesTwoMembersAndDecryptsApplicationMessage() {
+        assertTrue(
+            "Independent Alice and Bob MLS providers must complete Welcome join and decrypt the encrypted application message",
+            NativeMeshx.mlsTwoMemberRoundTripSelfTest()
+        )
+    }
+
+    @Test
     fun packagedRustLibraryDerivesStableTransportIdentityAndStarts() {
         val privateIdentity = NativeMeshx.generateIdentity()
         assertTrue("Native identity must not be empty", privateIdentity.isNotEmpty())
