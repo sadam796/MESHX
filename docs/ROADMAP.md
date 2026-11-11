@@ -20,7 +20,7 @@ A planned feature is not implemented until it has working tests on the intended 
 - [x] Compile the OpenMLS SQLite provider and persistence test code for Android ARM64 in CI.
 - [ ] Select and implement encrypted persistent MLS storage suitable for Android.
 - [x] Add 128-bit contact fingerprint display and manual out-of-band comparison marker.
-- [ ] Add identity-change warnings and explicit transport-key rotation confirmation.
+- [x] Detect changed signed transport Peer IDs for the same identity fingerprint; require explicit confirmation before replacement and reject signed-to-legacy downgrade (Android CI tests policy decisions).
 - [ ] Do not add phone-number or email registration.
 
 ## Stage 2 — first worldwide Internet messaging prototype
@@ -28,6 +28,7 @@ A planned feature is not implemented until it has working tests on the intended 
 - [x] Pass the local two-peer TCP/Noise/Yamux connection and request/response exchange test in host CI (local protocol smoke test only; not app messaging or worldwide delivery).
 - [x] Add a bounded in-memory opaque delivery-envelope queue prototype with expiry, duplicate-ID, hop-limit, ciphertext-size, entry-count, and aggregate-byte validation.
 - [x] Add a bounded parser for replaceable bootstrap multiaddresses with required peer identities, malformed/duplicate rejection, and a 32-endpoint cap (configuration parser only; no live discovery yet).
+- [x] Add a user-triggered Kademlia closest-peer lookup for a signed contact Peer ID (query can be queued; live public discovery is not yet verified).
 - [ ] Verify live peer discovery/bootstrap connections against reachable, replaceable nodes and test successful peer discovery across different networks.
 - [x] Verify the Rust-to-Kotlin JNI startup bridge on Android ARM64 and x86_64 emulator CI; APK packaging, app launch, native listener startup, and restart identity check pass.
 - [x] Wire bounded user-configurable bootstrap multiaddresses through the Android UI/JNI to outbound dial requests and Kademlia bootstrap initiation (live peer reachability is not yet verified).
