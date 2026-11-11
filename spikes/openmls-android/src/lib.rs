@@ -13,41 +13,42 @@ use openmls_traits::OpenMlsProvider;
 const TEST_CIPHERSUITE: Ciphersuite =
     Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
 
-/// Serialize the complete OpenMLS provider store for the encrypted Android
-/// persistence boundary. The returned bytes contain secrets and must be
-/// encrypted before they are written to disk.
-fn snapshot_provider(provider: &OpenMlsRustCrypto) -> Vec<u8> {
-    let entries: Vec<(Vec<u8>, Vec<u8>)> = provider
-        .storage()
-        .values
-        .read()
-        .expect("OpenMLS storage read lock")
-        .iter()
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect();
-    serde_json::to_vec(&entries).expect("serialize OpenMLS provider store")
-}
-
-/// Restore an OpenMLS provider from bytes obtained from the encrypted Android
-/// state vault. Callers must never pass plaintext files or untrusted snapshots.
-fn restore_provider(snapshot: &[u8]) -> OpenMlsRustCrypto {
-    let entries: Vec<(Vec<u8>, Vec<u8>)> =
-        serde_json::from_slice(snapshot).expect("deserialize OpenMLS provider store");
-    let provider = OpenMlsRustCrypto::default();
-    provider
-        .storage()
-        .values
-        .write()
-        .expect("OpenMLS storage write lock")
-        .extend(entries);
-    provider
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use openmls::framing::ProcessedMessageContent;
 
+    /// Serialize the complete OpenMLS provider store for the encrypted Android
+    /// persistence boundary. The returned bytes contain secrets and must be
+    /// encrypted before they are written to disk.
+    fn snapshot_provider(provider: &OpenMlsRustCrypto) -> Vec<u8> {
+        let entries: Vec<(Vec<u8>, Vec<u8>)> = provider
+            .storage()
+            .values
+            .read()
+            .expect("OpenMLS storage read lock")
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        serde_json::to_vec(&entries).expect("serialize OpenMLS provider store")
+    }
+    
+    /// Restore an OpenMLS provider from bytes obtained from the encrypted Android
+    /// state vault. Callers must never pass plaintext files or untrusted snapshots.
+    fn restore_provider(snapshot: &[u8]) -> OpenMlsRustCrypto {
+        let entries: Vec<(Vec<u8>, Vec<u8>)> =
+            serde_json::from_slice(snapshot).expect("deserialize OpenMLS provider store");
+        let provider = OpenMlsRustCrypto::default();
+        provider
+            .storage()
+            .values
+            .write()
+            .expect("OpenMLS storage write lock")
+            .extend(entries);
+        provider
+    }
+    
+    
     fn new_member(
         identity: &[u8],
         provider: &OpenMlsRustCrypto,
