@@ -186,14 +186,20 @@ internal data class ParsedPublicIdentity(
 
 internal enum class ContactImportDecision { ADD, SAME_IDENTITY, UPGRADE_LEGACY, TRANSPORT_KEY_CHANGED, SIGNED_BINDING_DOWNGRADE }
 internal data class PendingContactTransportRotation(val rawPayload: String, val parsed: ParsedPublicIdentity)
-internal fun classifyContactImport(existingPayloads: Set<String>, incoming: ParsedPublicIdentity): ContactImportDecision {
-    val existing = existingPayloads.asSequence().mapNotNull { raw ->
-        try { parsePublicIdentity(raw) } catch (_: Exception) { null }
-    }.firstOrNull { it.fingerprint == incoming.fingerprint } ?: return ContactImportDecision.ADD
+internal fun classifyParsedContactImport(existing: ParsedPublicIdentity?, incoming: ParsedPublicIdentity): ContactImportDecision {
+    if (existing == null) return ContactImportDecision.ADD
+    if (existing.fingerprint != incoming.fingerprint) return ContactImportDecision.ADD
     if (existing.authenticatedBinding && !incoming.authenticatedBinding) return ContactImportDecision.SIGNED_BINDING_DOWNGRADE
     if (existing.transportPeerId != null && incoming.transportPeerId != null && existing.transportPeerId != incoming.transportPeerId) return ContactImportDecision.TRANSPORT_KEY_CHANGED
     if (!existing.authenticatedBinding && incoming.authenticatedBinding) return ContactImportDecision.UPGRADE_LEGACY
     return ContactImportDecision.SAME_IDENTITY
+}
+
+internal fun classifyContactImport(existingPayloads: Set<String>, incoming: ParsedPublicIdentity): ContactImportDecision {
+    val existing = existingPayloads.asSequence().mapNotNull { raw ->
+        try { parsePublicIdentity(raw) } catch (_: Exception) { null }
+    }.firstOrNull { it.fingerprint == incoming.fingerprint }
+    return classifyParsedContactImport(existing, incoming)
 }
 
 private fun fingerprint(publicKey: ByteArray): String {
