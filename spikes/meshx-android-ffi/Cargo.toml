@@ -13,5 +13,10 @@ libp2p = { version = "=0.57.1", default-features = false, features = ["ed25519",
 meshx-libp2p-transport-spike = { path = "../libp2p-transport" }
 futures = "=0.3.31"
 tokio = { version = "1.53", features = ["rt-multi-thread", "time", "net", "sync", "macros"] }
+openmls = { version = "=0.9.2", features = ["openmls_rust_crypto"] }
+openmls_rust_crypto = "=0.6.0"
+openmls_basic_credential = "=0.6.0"
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.145"
 
 [dev-dependencies]
