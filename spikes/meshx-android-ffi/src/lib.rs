@@ -8,6 +8,7 @@ use std::{
 };
 
 mod mls_snapshot;
+mod mls_group;
 
 use futures::StreamExt;
 use jni::{objects::{JByteArray, JObject, JString}, sys::{jboolean, jbyteArray, jstring, JNI_FALSE, JNI_TRUE}, JNIEnv};
@@ -412,6 +413,42 @@ pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeStartTransport(
         Err(error) => format!("MESHX identity could not be read from Android: {error}"),
     };
     jni_string(&mut env, result)
+}
+
+
+/// Kotlin: NativeMeshx.nativeMlsCreateGroupSnapshot(identity: ByteArray)
+/// Creates an RFC 9420 group and returns opaque state for the encrypted Android vault.
+#[no_mangle]
+pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeMlsCreateGroupSnapshot(
+    mut env: JNIEnv,
+    _this: JObject,
+    identity: JByteArray,
+) -> jbyteArray {
+    match env.convert_byte_array(&identity)
+        .map_err(|error| format!("MLS credential identity could not be read: {error}"))
+        .and_then(|bytes| mls_group::create_group_snapshot(&bytes)) {
+        Ok(bytes) => env.byte_array_from_slice(&bytes)
+            .map(|array| array.into_raw())
+            .unwrap_or(std::ptr::null_mut()),
+        Err(error) => {
+            set_status(format!("MESHX MLS group creation error: {error}"));
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Kotlin: NativeMeshx.nativeMlsValidateGroupSnapshot(snapshot: ByteArray)
+/// Restores the provider and verifies both the MLS group and its signing key.
+#[no_mangle]
+pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeMlsValidateGroupSnapshot(
+    mut env: JNIEnv,
+    _this: JObject,
+    snapshot: JByteArray,
+) -> jboolean {
+    match env.convert_byte_array(&snapshot) {
+        Ok(bytes) if mls_group::validate_group_snapshot(&bytes).is_ok() => JNI_TRUE,
+        _ => JNI_FALSE,
+    }
 }
 
 #[cfg(test)]
