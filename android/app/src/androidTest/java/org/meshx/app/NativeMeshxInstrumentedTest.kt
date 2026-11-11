@@ -32,6 +32,15 @@ class NativeMeshxInstrumentedTest {
     }
 
     @Test
+    fun nativeDhtLookupRejectsMalformedPeerId() {
+        val result = NativeMeshx.findPeer("not-a-peer-id")
+        assertTrue(
+            "Expected invalid Peer ID to be rejected, got: $result",
+            result.startsWith("MESHX peer discovery error: Invalid MESHX transport Peer ID.")
+        )
+    }
+
+    @Test
     fun signedMESHX2QrBindsIdentityKeyToTransportPeerAndRejectsTampering() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val prefs = context.getSharedPreferences("meshx_local_contacts", android.content.Context.MODE_PRIVATE)
