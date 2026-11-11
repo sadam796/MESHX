@@ -8,7 +8,6 @@
 use openmls::prelude::*;
 use openmls_basic_credential::SignatureKeyPair;
 use openmls_rust_crypto::OpenMlsRustCrypto;
-use openmls_traits::OpenMlsProvider;
 
 const TEST_CIPHERSUITE: Ciphersuite =
     Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
@@ -17,6 +16,7 @@ const TEST_CIPHERSUITE: Ciphersuite =
 mod tests {
     use super::*;
     use openmls::framing::ProcessedMessageContent;
+    use openmls_traits::OpenMlsProvider;
 
     /// Serialize the complete OpenMLS provider store for the encrypted Android
     /// persistence boundary. The returned bytes contain secrets and must be
