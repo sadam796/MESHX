@@ -2,7 +2,7 @@
 
 ## Status
 
-This is the Android persistence foundation for the OpenMLS engine. It is **not yet** an OpenMLS `StorageProvider` and is not wired to the Android JNI transport. A separate Rust spike now exercises a two-member RFC 9420 flow (create group, add member, Welcome join, encrypted application message, provider snapshot/restore, decrypt). That Rust test uses an in-memory provider and serialized snapshots; it does not call this Android vault or write plaintext snapshots to disk.
+The Android Keystore vault is now connected to a real OpenMLS Rust provider snapshot through JNI. Rust can create a provider store containing an MLS Ed25519 signing key, serialize the provider store, and restore that signing key from bytes returned by the Android vault. An Android emulator instrumentation test exercises the complete Rust → JNI → AES-GCM Keystore vault → JNI → Rust round trip and verifies that corrupted snapshots are rejected. This is the first persistence bridge milestone, not yet a complete OpenMLS `StorageProvider` adapter or a group messaging engine. The separate Rust spike also tests a two-member RFC 9420 flow (create group, add member, Welcome join, encrypted application message, provider snapshot/restore, decrypt).
 
 ## Storage contract
 
