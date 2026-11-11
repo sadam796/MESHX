@@ -30,7 +30,7 @@ class MlsStateVaultInstrumentedTest {
             "Raw serialized MLS state must not appear in the file",
             String(stored, Charsets.ISO_8859_1).contains(String(state, Charsets.ISO_8859_1))
         )
-        assertArrayEquals("A fresh vault instance must restore the exact snapshot", state, MlsStateVault(context).load(groupId))
+        assertArrayEquals("A fresh vault instance must restore the exact snapshot", state, MlsStateVault(context).load(groupId)!!)
 
         vault.delete(groupId)
         assertFalse("Deleted MLS state file should no longer exist", file.exists())
@@ -68,7 +68,7 @@ class MlsStateVaultInstrumentedTest {
 
         vault.save(firstGroup, state)
 
-        assertArrayEquals(state, vault.load(firstGroup))
+        assertArrayEquals(state, vault.load(firstGroup)!!)
         assertTrue("Different group IDs must map to separate records",
             vault.fileForTesting(firstGroup) != vault.fileForTesting(secondGroup))
         assertTrue("The second group must not have a stored snapshot",
