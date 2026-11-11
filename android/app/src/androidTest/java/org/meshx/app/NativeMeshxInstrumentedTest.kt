@@ -1,7 +1,10 @@
 package org.meshx.app
 
+import android.util.Base64
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import org.junit.Assert.assertArrayEquals
+import androidx.test.platform.app.InstrumentationRegistry
+import org.json.JSONObject
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -19,12 +22,39 @@ class NativeMeshxInstrumentedTest {
         val peerId = NativeMeshx.transportPeerId(publicKey)
         assertTrue("Expected an Ed25519 libp2p Peer ID, got: $peerId", peerId.startsWith("12D3Koo"))
 
-        assertArrayEquals(publicKey, NativeMeshx.transportPublicKey(privateIdentity))
+        assertTrue(publicKey.contentEquals(NativeMeshx.transportPublicKey(privateIdentity)))
         val startResult = NativeMeshx.start(privateIdentity)
         assertTrue(
             "Expected Rust JNI bridge to start, got: $startResult",
             startResult.startsWith("MESHX libp2p swarm starting") ||
                 startResult.contains("MESHX libp2p TCP listener active")
         )
+    }
+
+    @Test
+    fun signedMESHX2QrBindsIdentityKeyToTransportPeerAndRejectsTampering() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val prefs = context.getSharedPreferences("meshx_local_contacts", android.content.Context.MODE_PRIVATE)
+        val identity = loadOrCreateIdentity(prefs)
+
+        val parsed = parsePublicIdentity(identity.qrPayload)
+        assertEquals(identity.fingerprint, parsed.fingerprint)
+        assertEquals(identity.transportPeerId, parsed.transportPeerId)
+        assertTrue(parsed.authenticatedBinding)
+
+        val jsonBytes = Base64.decode(identity.qrPayload.removePrefix("MESHX2:"), Base64.DEFAULT)
+        val json = JSONObject(String(jsonBytes, Charsets.UTF_8))
+        val transportKey = Base64.decode(json.getString("transport_public_key"), Base64.DEFAULT)
+        transportKey[transportKey.lastIndex] = (transportKey.last().toInt() xor 1).toByte()
+        json.put("transport_public_key", Base64.encodeToString(transportKey, Base64.NO_WRAP))
+        val tampered = "MESHX2:" + Base64.encodeToString(json.toString().toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+
+        var rejected = false
+        try {
+            parsePublicIdentity(tampered)
+        } catch (_: IllegalArgumentException) {
+            rejected = true
+        }
+        assertTrue("A changed transport key must fail signature verification", rejected)
     }
 }
