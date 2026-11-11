@@ -12,6 +12,20 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class NativeMeshxInstrumentedTest {
     @Test
+    fun openMlsProviderSnapshotCrossesJniAndAndroidKeystoreVault() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val recordId = "jni-openmls-vault-" + System.nanoTime()
+        val repository = MlsStateRepository(context)
+
+        repository.createAndSaveSignerState(recordId)
+        assertTrue(
+            "Rust must restore the original MLS signing key after the Android vault round trip",
+            repository.restoreAndValidateSignerState(recordId)
+        )
+        repository.delete(recordId)
+    }
+
+    @Test
     fun packagedRustLibraryDerivesStableTransportIdentityAndStarts() {
         val privateIdentity = NativeMeshx.generateIdentity()
         assertTrue("Native identity must not be empty", privateIdentity.isNotEmpty())
