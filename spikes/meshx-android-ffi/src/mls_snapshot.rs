@@ -3,7 +3,7 @@
 //! Snapshots contain MLS signing secrets. They are opaque bytes here and must
 //! only be persisted after encryption by MlsStateVault on Android.
 
-use openmls::prelude::Ciphersuite;
+use openmls::prelude::{Ciphersuite, OpenMlsProvider};
 use openmls_basic_credential::SignatureKeyPair;
 use openmls_rust_crypto::OpenMlsRustCrypto;
 use serde::{Deserialize, Serialize};
@@ -62,7 +62,7 @@ pub fn validate_signer_snapshot(bytes: &[u8]) -> Result<(), String> {
         provider.storage(),
         &snapshot.signer_public,
         MLS_CIPHERSUITE.signature_algorithm(),
-    ).map_err(|error| format!("MLS signing key restore failed: {error:?}"))?;
+    ).ok_or_else(|| "MLS signing key was not found in restored provider storage".to_owned())?;
 
     Ok(())
 }
