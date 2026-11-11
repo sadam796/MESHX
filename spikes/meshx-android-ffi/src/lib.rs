@@ -451,6 +451,23 @@ pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeMlsValidateGroupSnap
     }
 }
 
+
+/// Kotlin: NativeMeshx.nativeMlsTwoMemberRoundTripSelfTest()
+/// Exercises independent Alice/Bob MLS providers and a real encrypted app message.
+#[no_mangle]
+pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeMlsTwoMemberRoundTripSelfTest(
+    _env: JNIEnv,
+    _this: JObject,
+) -> jboolean {
+    match mls_group::two_member_round_trip_self_test() {
+        Ok(()) => JNI_TRUE,
+        Err(error) => {
+            set_status(format!("MESHX MLS two-member self-test failed: {error}"));
+            JNI_FALSE
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
