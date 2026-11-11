@@ -237,7 +237,7 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
                                 Some(TransportCommand::FindPeer(peer_id)) => {
                                     let query_id = meshx_libp2p_transport_spike::find_closest_peers(
                                         &mut swarm.behaviour_mut().kad,
-                                        peer_id,
+                                        peer_id.clone(),
                                     );
                                     set_status(format!(
                                         "MESHX DHT lookup started for {peer_id}; query {query_id:?}; returned peers are only routing candidates, not proof the contact is online; local peer id {thread_peer_label}"
