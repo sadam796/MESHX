@@ -20,12 +20,11 @@ class NativeMeshxInstrumentedTest {
         assertTrue("Expected an Ed25519 libp2p Peer ID, got: $peerId", peerId.startsWith("12D3Koo"))
 
         assertArrayEquals(publicKey, NativeMeshx.transportPublicKey(privateIdentity))
+        val startResult = NativeMeshx.start(privateIdentity)
         assertTrue(
-            "Expected Rust JNI bridge to start, got: ${NativeMeshx.start(privateIdentity)}",
-            NativeMeshx.start(privateIdentity).let {
-                it.startsWith("MESHX libp2p swarm starting") ||
-                    it.contains("MESHX libp2p TCP listener active")
-            }
+            "Expected Rust JNI bridge to start, got: $startResult",
+            startResult.startsWith("MESHX libp2p swarm starting") ||
+                startResult.contains("MESHX libp2p TCP listener active")
         )
     }
 }
