@@ -154,7 +154,7 @@ pub fn two_member_round_trip_self_test() -> Result<(), String> {
     let processed = bob.process_message(&bob_provider, protocol_message)
         .map_err(|e| format!("MLS application decryption failed: {e:?}"))?;
     match processed.into_content() {
-        ProcessedMessageContent::ApplicationMessage(message) if message.into_bytes() == plaintext => Ok(()),
+        ProcessedMessageContent::ApplicationMessage(message) => { if message.into_bytes() == plaintext { Ok(()) } else { Err("Bob recovered different MLS application plaintext".to_owned()) } },
         _ => Err("Bob did not recover the expected MLS application plaintext".to_owned()),
     }
 }
