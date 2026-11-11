@@ -13,6 +13,7 @@ use libp2p::{swarm::SwarmEvent, tcp, yamux, Multiaddr, SwarmBuilder};
 
 enum TransportCommand {
     AddBootstrapPeers(Vec<String>),
+    FindPeer(libp2p::PeerId),
 }
 
 static STARTED: AtomicBool = AtomicBool::new(false);
@@ -66,6 +67,22 @@ fn queue_bootstrap_peers(raw: &str) -> Result<String, String> {
     sender.send(TransportCommand::AddBootstrapPeers(addresses))
         .map_err(|_| "MESHX network thread is not accepting commands.".to_owned())?;
     Ok(format!("MESHX: {count} bootstrap peer(s) queued. Connection and DHT status will update below."))
+}
+
+fn parse_peer_id_input(raw: &str) -> Result<libp2p::PeerId, String> {
+    raw.trim().parse::<libp2p::PeerId>()
+        .map_err(|_| "Invalid MESHX transport Peer ID.".to_owned())
+}
+
+fn queue_peer_lookup(raw: &str) -> Result<String, String> {
+    let peer_id = parse_peer_id_input(raw)?;
+    let sender = command_sender_store().lock()
+        .map_err(|_| "MESHX network command queue is unavailable".to_owned())?
+        .clone()
+        .ok_or_else(|| "Start the MESHX network before searching for contacts.".to_owned())?;
+    sender.send(TransportCommand::FindPeer(peer_id))
+        .map_err(|_| "MESHX network thread is not accepting commands.".to_owned())?;
+    Ok("MESHX DHT peer lookup queued. Results are candidate routing peers, not proof that the contact is online.".to_owned())
 }
 
 fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
@@ -217,6 +234,15 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
                                         )),
                                     }
                                 }
+                                Some(TransportCommand::FindPeer(peer_id)) => {
+                                    let query_id = meshx_libp2p_transport_spike::find_closest_peers(
+                                        &mut swarm.behaviour_mut().kad,
+                                        peer_id,
+                                    );
+                                    set_status(format!(
+                                        "MESHX DHT lookup started for {peer_id}; query {query_id:?}; returned peers are only routing candidates, not proof the contact is online; local peer id {thread_peer_label}"
+                                    ));
+                                }
                                 None => break,
                             }
                         }
@@ -271,6 +297,21 @@ pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeAddBootstrapPeers(
         Ok(value) => queue_bootstrap_peers(&value.to_string_lossy())
             .unwrap_or_else(|error| format!("MESHX bootstrap error: {error}")),
         Err(error) => format!("MESHX bootstrap list could not be read from Android: {error}"),
+    };
+    jni_string(&mut env, result)
+}
+
+/// Kotlin: NativeMeshx.nativeFindPeer(peerId: String)
+#[no_mangle]
+pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeFindPeer(
+    mut env: JNIEnv,
+    _this: JObject,
+    raw_peer_id: JString,
+) -> jstring {
+    let result = match env.get_string(&raw_peer_id) {
+        Ok(value) => queue_peer_lookup(&value.to_string_lossy())
+            .unwrap_or_else(|error| format!("MESHX peer discovery error: {error}")),
+        Err(error) => format!("MESHX peer discovery error: Peer ID could not be read from Android: {error}"),
     };
     jni_string(&mut env, result)
 }
@@ -390,6 +431,14 @@ mod tests {
             format!("/ip4/127.0.0.1/tcp/4001/p2p/{peer}")
         }).collect();
         assert!(parse_bootstrap_input(&addresses.join("\n")).is_err());
+    }
+
+    #[test]
+    fn peer_lookup_parser_accepts_real_peer_ids_and_rejects_invalid_input() {
+        let expected = libp2p::identity::Keypair::generate_ed25519().public().to_peer_id();
+        assert_eq!(parse_peer_id_input(&format!("  {expected}  ")).unwrap(), expected);
+        assert!(parse_peer_id_input("").is_err());
+        assert!(parse_peer_id_input("not-a-peer-id").is_err());
     }
 
     #[test]
