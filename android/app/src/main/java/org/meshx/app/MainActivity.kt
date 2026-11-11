@@ -172,13 +172,13 @@ class MainActivity : ComponentActivity() {
 
 private const val IDENTITY_BINDING_DOMAIN = "MESHX-TRANSPORT-BINDING-V2:"
 
-private data class MeshxIdentity(
+internal data class MeshxIdentity(
     val fingerprint: String,
     val qrPayload: String,
     val transportPeerId: String
 )
 
-private data class ParsedPublicIdentity(
+internal data class ParsedPublicIdentity(
     val fingerprint: String,
     val transportPeerId: String?,
     val authenticatedBinding: Boolean
@@ -192,7 +192,7 @@ private fun fingerprint(publicKey: ByteArray): String {
 private fun identityBindingBytes(transportPublicKey: ByteArray): ByteArray =
     IDENTITY_BINDING_DOMAIN.toByteArray(Charsets.UTF_8) + transportPublicKey
 
-private fun parsePublicIdentity(raw: String): ParsedPublicIdentity {
+internal fun parsePublicIdentity(raw: String): ParsedPublicIdentity {
     require(raw.startsWith("MESHX1:") || raw.startsWith("MESHX2:")) {
         "MESHX1 ya signed MESHX2 public identity required."
     }
@@ -224,7 +224,7 @@ private fun parsePublicIdentity(raw: String): ParsedPublicIdentity {
     return ParsedPublicIdentity(fingerprint(identityPublicKey), actualPeerId, true)
 }
 
-private fun loadOrCreateIdentity(prefs: android.content.SharedPreferences): MeshxIdentity {
+internal fun loadOrCreateIdentity(prefs: android.content.SharedPreferences): MeshxIdentity {
     val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
     if (!keyStore.containsAlias(IDENTITY_ALIAS)) {
         val generator = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore")
