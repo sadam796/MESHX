@@ -30,6 +30,9 @@ import java.security.KeyFactory
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.MessageDigest
+import java.security.PrivateKey
+import java.security.Signature
+import org.json.JSONObject
 import java.security.spec.ECGenParameterSpec
 import java.security.spec.X509EncodedKeySpec
 import javax.crypto.Cipher
@@ -167,14 +170,61 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private data class MeshxIdentity(val fingerprint: String, val qrPayload: String)
+private const val IDENTITY_BINDING_DOMAIN = "MESHX-TRANSPORT-BINDING-V2:"
+
+private data class MeshxIdentity(
+    val fingerprint: String,
+    val qrPayload: String,
+    val transportPeerId: String
+)
+
+private data class ParsedPublicIdentity(
+    val fingerprint: String,
+    val transportPeerId: String?,
+    val authenticatedBinding: Boolean
+)
 
 private fun fingerprint(publicKey: ByteArray): String {
     val digest = MessageDigest.getInstance("SHA-256").digest(publicKey)
     return digest.take(16).joinToString("") { "%02X".format(it) }.chunked(4).joinToString("-")
 }
 
-private fun loadOrCreateIdentity(): MeshxIdentity {
+private fun identityBindingBytes(transportPublicKey: ByteArray): ByteArray =
+    IDENTITY_BINDING_DOMAIN.toByteArray(Charsets.UTF_8) + transportPublicKey
+
+private fun parsePublicIdentity(raw: String): ParsedPublicIdentity {
+    require(raw.startsWith("MESHX1:") || raw.startsWith("MESHX2:")) {
+        "MESHX1 ya signed MESHX2 public identity required."
+    }
+    if (raw.startsWith("MESHX1:")) {
+        val keyBytes = Base64.decode(raw.removePrefix("MESHX1:"), Base64.DEFAULT)
+        KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(keyBytes))
+        return ParsedPublicIdentity(fingerprint(keyBytes), null, false)
+    }
+
+    val payloadBytes = Base64.decode(raw.removePrefix("MESHX2:"), Base64.DEFAULT)
+    val payload = JSONObject(String(payloadBytes, Charsets.UTF_8))
+    require(payload.getInt("version") == 2) { "Unsupported MESHX identity version." }
+    val identityPublicKey = Base64.decode(payload.getString("identity_public_key"), Base64.DEFAULT)
+    val transportPublicKey = Base64.decode(payload.getString("transport_public_key"), Base64.DEFAULT)
+    val bindingSignature = Base64.decode(payload.getString("binding_signature"), Base64.DEFAULT)
+    val expectedPeerId = payload.getString("transport_peer_id")
+    val identityKey = KeyFactory.getInstance("EC")
+        .generatePublic(X509EncodedKeySpec(identityPublicKey))
+    val verifier = Signature.getInstance("SHA256withECDSA")
+    verifier.initVerify(identityKey)
+    verifier.update(identityBindingBytes(transportPublicKey))
+    require(verifier.verify(bindingSignature)) {
+        "MESHX2 transport-key signature is invalid. Contact was not added."
+    }
+    val actualPeerId = NativeMeshx.transportPeerId(transportPublicKey)
+    require(actualPeerId == expectedPeerId) {
+        "MESHX2 transport Peer ID does not match its public key."
+    }
+    return ParsedPublicIdentity(fingerprint(identityPublicKey), actualPeerId, true)
+}
+
+private fun loadOrCreateIdentity(prefs: android.content.SharedPreferences): MeshxIdentity {
     val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
     if (!keyStore.containsAlias(IDENTITY_ALIAS)) {
         val generator = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore")
@@ -185,10 +235,27 @@ private fun loadOrCreateIdentity(): MeshxIdentity {
             .setDigests(KeyProperties.DIGEST_SHA256).build())
         generator.generateKeyPair()
     }
-    val publicKey = keyStore.getCertificate(IDENTITY_ALIAS).publicKey.encoded
+    val identityPublicKey = keyStore.getCertificate(IDENTITY_ALIAS).publicKey.encoded
+    val identityPrivateKey = keyStore.getKey(IDENTITY_ALIAS, null) as? PrivateKey
+        ?: throw IllegalStateException("MESHX identity signing key is unavailable in Android Keystore.")
+    val transportIdentity = loadOrCreateTransportIdentity(prefs)
+    val transportPublicKey = NativeMeshx.transportPublicKey(transportIdentity)
+    val transportPeerId = NativeMeshx.transportPeerId(transportPublicKey)
+    val signer = Signature.getInstance("SHA256withECDSA")
+    signer.initSign(identityPrivateKey)
+    signer.update(identityBindingBytes(transportPublicKey))
+    val bindingSignature = signer.sign()
+    val payload = JSONObject()
+        .put("version", 2)
+        .put("identity_public_key", Base64.encodeToString(identityPublicKey, Base64.NO_WRAP))
+        .put("transport_public_key", Base64.encodeToString(transportPublicKey, Base64.NO_WRAP))
+        .put("transport_peer_id", transportPeerId)
+        .put("binding_signature", Base64.encodeToString(bindingSignature, Base64.NO_WRAP))
+        .toString()
     return MeshxIdentity(
-        fingerprint(publicKey),
-        "MESHX1:" + Base64.encodeToString(publicKey, Base64.NO_WRAP)
+        fingerprint(identityPublicKey),
+        "MESHX2:" + Base64.encodeToString(payload.toByteArray(Charsets.UTF_8), Base64.NO_WRAP),
+        transportPeerId
     )
 }
 
@@ -242,14 +309,14 @@ private fun MeshxHome() {
     var contacts by remember {
         mutableStateOf(
             contactPublicKeys.mapNotNull { payload ->
-                try {
-                    val encoded = payload.removePrefix("MESHX1:")
-                    fingerprint(Base64.decode(encoded, Base64.DEFAULT))
-                } catch (_: Exception) { null }
+                try { parsePublicIdentity(payload).fingerprint } catch (_: Exception) { null }
             }.distinct().ifEmpty {
                 prefs.getStringSet("contacts", emptySet())?.toList() ?: emptyList()
             }
         )
+    }
+    var contactTransportPeers by remember {
+        mutableStateOf(prefs.getStringSet("contact_transport_peers", emptySet())?.toSet() ?: emptySet())
     }
     var verifiedContacts by remember {
         mutableStateOf(prefs.getStringSet("verified_contacts", emptySet())?.toSet() ?: emptySet())
@@ -294,7 +361,7 @@ private fun MeshxHome() {
                 Text("No phone number or email required. Your private key stays in Android Keystore on this device.")
                 Button(onClick = {
                     try {
-                        identity = loadOrCreateIdentity()
+                        identity = loadOrCreateIdentity(prefs)
                         error = null
                     } catch (e: Exception) {
                         error = e.localizedMessage ?: "Identity could not be created."
@@ -312,14 +379,15 @@ private fun MeshxHome() {
                                 contentDescription = "Public identity QR code",
                                 modifier = Modifier.height(220.dp)
                             )
-                            Text("QR mein sirf public key hai. Private key kabhi share na karein.")
+                            Text("Signed MESHX2 identity. Transport Peer ID: ${current.transportPeerId}")
+                            Text("QR mein sirf public keys aur unka signature hai. Private keys kabhi share nahi hoti.")
                         }
                     }
                 }
 
                 Spacer(Modifier.height(24.dp))
                 Text("Add a contact", style = MaterialTheme.typography.titleLarge)
-                Text("QR image gallery se select karein, ya public identity text paste karein.")
+                Text("MESHX2 QR signed transport-key binding ke saath preferred hai. Older MESHX1 identity bhi import ho sakti hai, lekin usmein transport binding nahi hoti.")
                 Text("Security: contact ka fingerprint us person se kisi alag trusted channel par compare karein. Sirf QR scan karna identity verify nahi karta.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 OutlinedButton(onClick = { qrImagePicker.launch("image/*") }) { Text("Import QR image from gallery") }
                 OutlinedTextField(
@@ -332,22 +400,28 @@ private fun MeshxHome() {
                 Button(onClick = {
                     try {
                         val raw = importText.trim()
-                        require(raw.startsWith("MESHX1:")) { "MESHX1 public identity required." }
-                        val keyBytes = Base64.decode(raw.removePrefix("MESHX1:"), Base64.DEFAULT)
-                        KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(keyBytes))
-                        val id = fingerprint(keyBytes)
+                        val parsed = parsePublicIdentity(raw)
+                        val id = parsed.fingerprint
                         require(identity?.fingerprint != id) { "This is your own identity." }
                         val updated = (contacts + id).distinct()
-                        val publicIdentity = "MESHX1:" + Base64.encodeToString(keyBytes, Base64.NO_WRAP)
-                        val updatedKeys = contactPublicKeys + publicIdentity
+                        val updatedKeys = contactPublicKeys + raw
+                        val updatedTransportPeers = parsed.transportPeerId?.let {
+                            contactTransportPeers + "$id#$it"
+                        } ?: contactTransportPeers
                         prefs.edit()
                             .putStringSet("contacts", updated.toSet())
                             .putStringSet("contact_public_keys", updatedKeys)
+                            .putStringSet("contact_transport_peers", updatedTransportPeers)
                             .apply()
                         contacts = updated
                         contactPublicKeys = updatedKeys
+                        contactTransportPeers = updatedTransportPeers
                         importText = ""
-                        status = "Contact added: $id"
+                        status = if (parsed.authenticatedBinding) {
+                            "Signed MESHX2 identity and transport binding verified: $id"
+                        } else {
+                            "Legacy MESHX1 identity added: $id. No signed transport binding is present."
+                        }
                         error = null
                     } catch (e: Exception) {
                         error = e.localizedMessage ?: "Invalid public identity."
@@ -369,6 +443,12 @@ private fun MeshxHome() {
                         ) {
                             Column(Modifier.weight(1f)) {
                                 Text(contact, style = MaterialTheme.typography.bodySmall)
+                                val boundPeerId = contactTransportPeers.firstOrNull { it.startsWith("$contact#") }?.substringAfter("#")
+                                Text(
+                                    if (boundPeerId != null) "Signed transport binding: ${boundPeerId.take(18)}…" else "Legacy identity — transport key not bound",
+                                    color = if (boundPeerId != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.labelSmall
+                                )
                                 Text(if (contact in verifiedContacts) "Manually fingerprint-verified" else "Not verified", color = if (contact in verifiedContacts) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
                                 TextButton(onClick = {
                                     val updated = if (contact in verifiedContacts) verifiedContacts - contact else verifiedContacts + contact
