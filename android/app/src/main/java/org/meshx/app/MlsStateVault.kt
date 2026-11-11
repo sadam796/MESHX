@@ -106,6 +106,12 @@ internal class MlsStateVault(context: Context) {
 
     private fun getOrCreateKey(): SecretKey {
         getExistingKey()?.let { return it }
+        val existingSnapshots = directory.listFiles()?.any {
+            it.isFile && it.extension == "mls"
+        } == true
+        check(!existingSnapshots) {
+            "Saved MLS state exists but its Android Keystore key is missing. Refusing to replace encrypted data."
+        }
         val generator = JcaKeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
         generator.init(
             KeyGenParameterSpec.Builder(
