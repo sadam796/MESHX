@@ -10,6 +10,7 @@ A planned feature is not implemented until it has working tests on the intended 
 
 ## Stage 1 — local identity and safe foundations
 - [x] Generate a device-local EC identity using Android Keystore (prototype identity only).
+- [x] Persist the separate libp2p Ed25519 transport identity encrypted with Android Keystore AES-GCM; emulator CI confirms the Peer ID remains identical after app force-stop and relaunch.
 - [x] Add public identity QR generation and contact import.
 - [x] Add a local-only chat prototype.
 - [x] Encrypt local prototype chat records at rest with an Android Keystore AES-GCM key.
@@ -26,8 +27,9 @@ A planned feature is not implemented until it has working tests on the intended 
 - [x] Pass the local two-peer TCP/Noise/Yamux connection and request/response exchange test in host CI (local protocol smoke test only; not app messaging or worldwide delivery).
 - [x] Add a bounded in-memory opaque delivery-envelope queue prototype with expiry, duplicate-ID, hop-limit, ciphertext-size, entry-count, and aggregate-byte validation.
 - [x] Add a bounded parser for replaceable bootstrap multiaddresses with required peer identities, malformed/duplicate rejection, and a 32-endpoint cap (configuration parser only; no live discovery yet).
-- [ ] Implement live peer discovery/bootstrap connections that can use multiple replaceable endpoints.
-- [ ] Verify the Rust-to-Kotlin JNI startup bridge on Android ARM64 and emulator CI.
+- [ ] Verify live peer discovery/bootstrap connections against reachable, replaceable nodes and test successful peer discovery across different networks.
+- [x] Verify the Rust-to-Kotlin JNI startup bridge on Android ARM64 and x86_64 emulator CI; APK packaging, app launch, native listener startup, and restart identity check pass.
+- [x] Wire bounded user-configurable bootstrap multiaddresses through the Android UI/JNI to outbound dial requests and Kademlia bootstrap initiation (live peer reachability is not yet verified).
 - [ ] Integrate the reviewed MLS/session layer into the Android app.
 - [ ] Verify native libp2p Swarm startup on a physical ARM64 Android device. Current code starts a TCP/Noise/Yamux listener; it does not yet discover peers or send app messages.
 - [ ] Bind the app's human identity to protocol credentials with authenticated contact verification and identity-change warnings.
