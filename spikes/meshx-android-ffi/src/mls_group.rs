@@ -86,7 +86,7 @@ pub fn validate_group_snapshot(bytes: &[u8]) -> Result<(), String> {
         MLS_CIPHERSUITE.signature_algorithm(),
     ).ok_or_else(|| "MLS signing key was not found in restored provider storage".to_owned())?;
 
-    MlsGroup::load(provider.storage(), &snapshot.group_id)
+    MlsGroup::load(provider.storage(), &openmls::prelude::GroupId::from_slice(&snapshot.group_id))
         .map_err(|error| format!("MLS group restore failed: {error:?}"))?
         .ok_or_else(|| "MLS group was not found in restored provider storage".to_owned())?;
 
