@@ -309,6 +309,21 @@ pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeTransportPublicKey(
     }
 }
 
+/// Kotlin: NativeMeshx.nativeTransportPeerId(publicKey: ByteArray)
+#[no_mangle]
+pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeTransportPeerId(
+    mut env: JNIEnv,
+    _this: JObject,
+    public_key: JByteArray,
+) -> jstring {
+    let result = env.convert_byte_array(&public_key)
+        .ok()
+        .and_then(|bytes| libp2p::identity::PublicKey::try_decode_protobuf(&bytes).ok())
+        .map(|key| key.to_peer_id().to_string())
+        .unwrap_or_default();
+    jni_string(&mut env, result)
+}
+
 /// Kotlin: NativeMeshx.nativeStartTransport(identity: ByteArray)
 #[no_mangle]
 pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeStartTransport(
