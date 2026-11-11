@@ -17,6 +17,21 @@ permissions:
   contents: read
 
 jobs:
+  host-mls-roundtrip:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.91
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.91.0
+
+      - name: Run two-member MLS encryption and persistence test
+        working-directory: spikes/openmls-android
+        run: cargo test
+
   android-arm64-check:
     runs-on: ubuntu-latest
     steps:
