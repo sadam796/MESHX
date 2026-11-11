@@ -93,6 +93,72 @@ pub fn validate_group_snapshot(bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+
+/// Runs a real two-member RFC 9420 application-message round trip using two
+/// independent providers. This is an on-device cryptographic self-test only;
+/// it does not imply network delivery or contact authentication.
+pub fn two_member_round_trip_self_test() -> Result<(), String> {
+    use openmls::framing::{ProcessedMessageContent, MlsMessageIn};
+    use openmls::prelude::{KeyPackage, StagedWelcome};
+
+    let alice_provider = OpenMlsRustCrypto::default();
+    let bob_provider = OpenMlsRustCrypto::default();
+    let config = openmls::prelude::MlsGroupCreateConfig::builder()
+        .ciphersuite(MLS_CIPHERSUITE)
+        .use_ratchet_tree_extension(true)
+        .build();
+
+    let make_member = |identity: &[u8], provider: &OpenMlsRustCrypto| -> Result<_, String> {
+        let signer = SignatureKeyPair::new(MLS_CIPHERSUITE.signature_algorithm())
+            .map_err(|e| format!("MLS signer generation failed: {e:?}"))?;
+        signer.store(provider.storage())
+            .map_err(|e| format!("MLS signer storage failed: {e:?}"))?;
+        let credential = BasicCredential::new(identity.to_vec());
+        let credential_with_key = CredentialWithKey {
+            credential: credential.into(),
+            signature_key: signer.to_public_vec().into(),
+        };
+        Ok((signer, credential_with_key))
+    };
+
+    let (alice_signer, alice_credential) = make_member(b"meshx-self-test-alice", &alice_provider)?;
+    let (bob_signer, bob_credential) = make_member(b"meshx-self-test-bob", &bob_provider)?;
+    let mut alice = MlsGroup::new(&alice_provider, &alice_signer, &config, alice_credential)
+        .map_err(|e| format!("Alice MLS group creation failed: {e:?}"))?;
+    let bob_key_package = KeyPackage::builder()
+        .build(MLS_CIPHERSUITE, &bob_provider, &bob_signer, bob_credential)
+        .map_err(|e| format!("Bob KeyPackage creation failed: {e:?}"))?;
+    let (_commit, welcome, _group_info) = alice.add_members(
+        &alice_provider, &alice_signer, core::slice::from_ref(bob_key_package.key_package())
+    ).map_err(|e| format!("Alice could not add Bob: {e:?}"))?;
+    alice.merge_pending_commit(&alice_provider)
+        .map_err(|e| format!("Alice commit merge failed: {e:?}"))?;
+
+    let welcome: MlsMessageIn = welcome.into();
+    let welcome = match welcome.extract() {
+        openmls::prelude::MlsMessageBodyIn::Welcome(value) => value,
+        _ => return Err("OpenMLS did not produce a Welcome message".to_owned()),
+    };
+    let mut bob = StagedWelcome::new_from_welcome(
+        &bob_provider, &config.join_config(), welcome,
+        Some(alice.export_ratchet_tree().into())
+    ).map_err(|e| format!("Bob Welcome processing failed: {e:?}"))?
+        .into_group(&bob_provider)
+        .map_err(|e| format!("Bob MLS group join failed: {e:?}"))?;
+
+    let plaintext = b"MESHX Android MLS self-test";
+    let ciphertext = alice.create_message(&alice_provider, &alice_signer, plaintext)
+        .map_err(|e| format!("MLS application encryption failed: {e:?}"))?;
+    let protocol_message = MlsMessageIn::from(ciphertext).try_into_protocol_message()
+        .map_err(|e| format!("MLS ciphertext parsing failed: {e:?}"))?;
+    let processed = bob.process_message(&bob_provider, protocol_message)
+        .map_err(|e| format!("MLS application decryption failed: {e:?}"))?;
+    match processed.into_content() {
+        ProcessedMessageContent::ApplicationMessage(message) if message.into_bytes() == plaintext => Ok(()),
+        _ => Err("Bob did not recover the expected MLS application plaintext".to_owned()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
