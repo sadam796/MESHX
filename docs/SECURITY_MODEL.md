@@ -1,5 +1,9 @@
 # MESHX Security Model
 
+## Contact transport-key changes
+
+For a saved MESHX2 identity, importing the same identity fingerprint with a different signed transport Peer ID raises a warning and requires explicit confirmation before replacing the saved binding. Importing unsigned MESHX1 over an existing signed MESHX2 binding is rejected as a downgrade. This is a local key-change safeguard, not proof of a person's real-world identity; users must still compare fingerprints over an independent trusted channel. Identity-key changes produce a different fingerprint and are not automatically linked to the old contact.
+
 ## Status: design document, not a security audit
 
 MESHX is an early Android prototype. The app can create a device identity, create/import MESHX2 signed identity-to-transport bindings, and save local prototype chat records using Android Keystore AES-GCM. Android emulator CI verifies that a valid MESHX2 binding imports and that changing its transport key without a new identity signature is rejected. An isolated Rust/OpenMLS test suite exercises two-member MLS message encryption, tampering rejection, replay rejection, non-member rejection, and SQLite group-state restoration after a simulated restart. This test code is not connected to the Android app. Its temporary SQLite fixture is unencrypted and must not hold real user data. The app itself does **not** yet provide end-to-end encrypted communication, MLS-authenticated messaging sessions, Internet message delivery, relay routing, or recovery. Do not use the prototype for sensitive conversations.
