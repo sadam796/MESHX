@@ -25,6 +25,21 @@ class NativeMeshxInstrumentedTest {
         repository.delete(recordId)
     }
 
+
+    @Test
+    fun nativeOpenMlsGroupIsCreatedAndRestoredThroughKeystoreVault() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val recordId = "jni-openmls-group-" + System.nanoTime()
+        val repository = MlsStateRepository(context)
+
+        repository.createAndSaveGroupState(recordId, "meshx-android-test-identity".toByteArray())
+        assertTrue(
+            "Rust must restore the RFC 9420 group and signer after the encrypted vault round trip",
+            repository.restoreAndValidateGroupState(recordId)
+        )
+        repository.delete(recordId)
+    }
+
     @Test
     fun packagedRustLibraryDerivesStableTransportIdentityAndStarts() {
         val privateIdentity = NativeMeshx.generateIdentity()
