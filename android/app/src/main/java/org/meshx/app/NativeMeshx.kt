@@ -22,6 +22,8 @@ internal object NativeMeshx {
     private external fun nativeFindPeer(peerId: String): String
     private external fun nativeStartTransport(identity: ByteArray): String
     private external fun nativeAddBootstrapPeers(addresses: String): String
+    private external fun nativeMlsCreateSignerSnapshot(): ByteArray
+    private external fun nativeMlsValidateSignerSnapshot(snapshot: ByteArray): Boolean
 
     fun generateIdentity(): ByteArray {
         check(loadError == null) { "Native bridge unavailable: $loadError" }
@@ -78,6 +80,29 @@ internal object NativeMeshx {
         nativeAddBootstrapPeers(addresses)
     } catch (error: UnsatisfiedLinkError) {
         "Native bootstrap method unavailable: ${error.message ?: "unknown JNI error"}"
+    }
+
+
+    /** Creates a real OpenMLS provider snapshot containing an MLS signing key. */
+    fun createMlsSignerSnapshot(): ByteArray {
+        check(loadError == null) { "Native bridge unavailable: $loadError" }
+        return try {
+            nativeMlsCreateSignerSnapshot().also {
+                check(it.isNotEmpty()) { "Native OpenMLS provider returned an empty snapshot." }
+            }
+        } catch (error: UnsatisfiedLinkError) {
+            throw IllegalStateException("Native OpenMLS snapshot method unavailable: ${error.message ?: "unknown JNI error"}", error)
+        }
+    }
+
+    /** Restores and verifies the MLS signing key from a vault-authenticated snapshot. */
+    fun validateMlsSignerSnapshot(snapshot: ByteArray): Boolean {
+        check(loadError == null) { "Native bridge unavailable: $loadError" }
+        return try {
+            nativeMlsValidateSignerSnapshot(snapshot)
+        } catch (error: UnsatisfiedLinkError) {
+            throw IllegalStateException("Native OpenMLS restore method unavailable: ${error.message ?: "unknown JNI error"}", error)
+        }
     }
 
     fun status(): String {
