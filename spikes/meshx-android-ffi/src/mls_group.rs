@@ -115,4 +115,80 @@ mod tests {
         tampered[last] ^= 1;
         assert!(validate_group_snapshot(&tampered).is_err());
     }
+
+    #[test]
+    fn two_member_group_encrypts_and_decrypts_after_provider_restore() {
+        use openmls::framing::{ProcessedMessageContent, MlsMessageIn};
+        use openmls::prelude::{KeyPackage, StagedWelcome};
+
+        let alice_provider = OpenMlsRustCrypto::default();
+        let bob_provider = OpenMlsRustCrypto::default();
+        let config = MlsGroupCreateConfig::builder()
+            .ciphersuite(MLS_CIPHERSUITE)
+            .use_ratchet_tree_extension(true)
+            .build();
+
+        let make_member = |identity: &[u8], provider: &OpenMlsRustCrypto| {
+            let signer = SignatureKeyPair::new(MLS_CIPHERSUITE.signature_algorithm()).unwrap();
+            signer.store(provider.storage()).unwrap();
+            let credential = BasicCredential::new(identity.to_vec());
+            let credential_with_key = CredentialWithKey {
+                credential: credential.into(),
+                signature_key: signer.to_public_vec().into(),
+            };
+            (signer, credential_with_key)
+        };
+
+        let (alice_signer, alice_credential) = make_member(b"meshx-alice", &alice_provider);
+        let (bob_signer, bob_credential) = make_member(b"meshx-bob", &bob_provider);
+        let mut alice = MlsGroup::new(&alice_provider, &alice_signer, &config, alice_credential).unwrap();
+        let bob_key_package = KeyPackage::builder()
+            .build(MLS_CIPHERSUITE, &bob_provider, &bob_signer, bob_credential)
+            .unwrap();
+        let (_commit, welcome, _group_info) = alice.add_members(
+            &alice_provider, &alice_signer, core::slice::from_ref(bob_key_package.key_package())
+        ).unwrap();
+        alice.merge_pending_commit(&alice_provider).unwrap();
+
+        let welcome: MlsMessageIn = welcome.into();
+        let welcome = match welcome.extract() {
+            openmls::prelude::MlsMessageBodyIn::Welcome(value) => value,
+            _ => panic!("expected MLS Welcome"),
+        };
+        let bob = StagedWelcome::new_from_welcome(
+            &bob_provider, &config.join_config(), welcome,
+            Some(alice.export_ratchet_tree().into())
+        ).unwrap().into_group(&bob_provider).unwrap();
+
+        let group_id = alice.group_id().clone();
+        let alice_entries = alice_provider.storage().values.read().unwrap().iter()
+            .map(|(k, v)| (k.clone(), v.clone())).collect::<Vec<_>>();
+        let bob_entries = bob_provider.storage().values.read().unwrap().iter()
+            .map(|(k, v)| (k.clone(), v.clone())).collect::<Vec<_>>();
+        let restored_alice = OpenMlsRustCrypto::default();
+        restored_alice.storage().values.write().unwrap().extend(alice_entries);
+        let restored_bob = OpenMlsRustCrypto::default();
+        restored_bob.storage().values.write().unwrap().extend(bob_entries);
+
+        let mut alice = MlsGroup::load(restored_alice.storage(), &group_id).unwrap().unwrap();
+        let mut bob = MlsGroup::load(restored_bob.storage(), bob.group_id()).unwrap().unwrap();
+        let signer = SignatureKeyPair::read(
+            restored_alice.storage(), alice_signer.public(),
+            MLS_CIPHERSUITE.signature_algorithm()
+        ).unwrap();
+
+        let plaintext = b"MESHX two-device MLS encrypted message";
+        let ciphertext = alice.create_message(&restored_alice, &signer, plaintext).unwrap();
+        let processed = bob.process_message(
+            &restored_bob,
+            MlsMessageIn::from(ciphertext).try_into_protocol_message().unwrap()
+        ).unwrap();
+        match processed.into_content() {
+            ProcessedMessageContent::ApplicationMessage(message) => {
+                assert_eq!(message.into_bytes(), plaintext);
+            }
+            other => panic!("expected application message, got {other:?}"),
+        }
+    }
+
 }
