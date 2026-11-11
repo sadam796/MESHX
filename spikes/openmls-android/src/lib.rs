@@ -6,17 +6,16 @@
 //! persistence without writing plaintext test state to disk.
 
 use openmls::prelude::*;
-use openmls_basic_credential::SignatureKeyPair;
-use openmls_rust_crypto::OpenMlsRustCrypto;
-
-const TEST_CIPHERSUITE: Ciphersuite =
-    Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use openmls::framing::ProcessedMessageContent;
-    use openmls_traits::OpenMlsProvider;
+    use openmls_basic_credential::SignatureKeyPair;
+    use openmls_rust_crypto::OpenMlsRustCrypto;
+
+    const TEST_CIPHERSUITE: Ciphersuite =
+        Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
 
     /// Serialize the complete OpenMLS provider store for the encrypted Android
     /// persistence boundary. The returned bytes contain secrets and must be
@@ -109,7 +108,10 @@ mod tests {
             .expect("Alice merges add-member commit");
 
         let welcome: MlsMessageIn = welcome.into();
-        let welcome = welcome.into_welcome().expect("Welcome message");
+        let welcome = match welcome.extract() {
+            MlsMessageBodyIn::Welcome(message) => message,
+            _ => panic!("Expected an MLS Welcome message"),
+        };
         let mut bob_group = StagedWelcome::new_from_welcome(
             &bob_provider,
             &create_config.join_config(),
@@ -158,7 +160,9 @@ mod tests {
         let processed = restored_bob_group
             .process_message(
                 &restored_bob_provider,
-                encrypted.into_protocol_message().expect("MLS protocol message"),
+                MlsMessageIn::from(encrypted)
+                    .try_into_protocol_message()
+                    .expect("MLS protocol message"),
             )
             .expect("Bob authenticates and decrypts MLS message");
 
