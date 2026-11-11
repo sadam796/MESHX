@@ -7,7 +7,10 @@ MESHX is an early-stage project exploring decentralized messaging over the Inter
 ## Current project status
 
 The Android prototype currently supports:
-- Device-local identity creation using Android Keystore.
+- Device-local EC contact identity plus a separate libp2p Ed25519 transport identity.
+- The libp2p transport private key is encrypted with an Android Keystore AES-GCM key; Android emulator CI verifies that the same Peer ID survives app force-stop and relaunch.
+- Android emulator CI verifies the native TCP/Noise/Yamux listener starts without an app crash.
+- User-configurable, bounded bootstrap multiaddresses are wired through Kotlin/JNI to outbound dial requests and Kademlia bootstrap initiation. This is configuration and startup wiring, not proof that a public bootstrap node is reachable.
 - Public identity QR generation and contact import.
 - A local-only chat prototype; messages do not reach another device.
 - Local prototype chat records encrypted at rest using an Android Keystore AES-GCM key.
@@ -18,7 +21,7 @@ The Android prototype currently supports:
 
 The OpenMLS/SQLite spike is not integrated into the Android app. Its test database uses ordinary, unencrypted SQLite and is only a temporary CI fixture. It is not safe for real user data. The libp2p queue is volatile in-memory prototype code, not durable relay storage.
 
-**Not implemented:** worldwide Internet message transport in the app, peer discovery, independent relays, durable offline store-and-forward, production end-to-end encrypted chats, encrypted media, Bluetooth/Wi-Fi Direct delivery, recovery phrase, encrypted backup, and iPhone app.
+**Not implemented or not yet verified:** real cross-network message delivery, successful discovery through a reachable public bootstrap node, independent relays, durable offline store-and-forward, production end-to-end encrypted chats, encrypted media, Bluetooth/Wi-Fi Direct delivery, recovery phrase, encrypted backup, and iPhone app.
 
 ## Product principles
 
