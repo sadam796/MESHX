@@ -29,7 +29,7 @@ App-private file: files/meshx_mls_state_v1/<SHA-256(groupId)>.mls
 
 ## Next integration work
 
-1. Connect the Rust provider snapshot/restore boundary to this Android vault so the serialized OpenMLS provider store is encrypted before every disk write and authenticated before restore.
+1. Replace the signer-only snapshot JNI API with group-scoped OpenMLS provider operations: create group, create KeyPackage, process Welcome, encrypt, and decrypt. Save a fresh encrypted provider snapshot after each state-changing operation.
 2. Bind the MLS credential signing key to a deliberate MESHX identity model; the existing MESHX2 transport-key signature is not automatically an MLS credential.
 3. Extend the Rust two-member test with tamper/replay and non-member rejection, and add an Android restart test that exercises the real Rust-to-vault bridge.
 4. Only then connect MLS ciphertext to libp2p request/response delivery. Noise remains hop-by-hop transport security; MLS provides group end-to-end protection.
