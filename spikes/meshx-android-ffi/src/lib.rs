@@ -290,6 +290,25 @@ pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeGenerateIdentity(
     }
 }
 
+/// Kotlin: NativeMeshx.nativeTransportPublicKey(identity: ByteArray)
+#[no_mangle]
+pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeTransportPublicKey(
+    mut env: JNIEnv,
+    _this: JObject,
+    identity: JByteArray,
+) -> jbyteArray {
+    let result = env.convert_byte_array(&identity)
+        .ok()
+        .and_then(|bytes| libp2p::identity::Keypair::from_protobuf_encoding(&bytes).ok())
+        .map(|keypair| keypair.public().encode_protobuf());
+    match result {
+        Some(bytes) => env.byte_array_from_slice(&bytes)
+            .map(|array| array.into_raw())
+            .unwrap_or(std::ptr::null_mut()),
+        None => std::ptr::null_mut(),
+    }
+}
+
 /// Kotlin: NativeMeshx.nativeStartTransport(identity: ByteArray)
 #[no_mangle]
 pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeStartTransport(
@@ -316,6 +335,18 @@ mod tests {
         let restored = libp2p::identity::Keypair::from_protobuf_encoding(&encoded)
             .expect("decode saved identity");
         assert_eq!(expected_peer_id, restored.public().to_peer_id());
+    }
+
+    #[test]
+    fn transport_public_key_is_derived_from_persisted_identity() {
+        let original = libp2p::identity::Keypair::generate_ed25519();
+        let encoded = original.to_protobuf_encoding().expect("encode identity");
+        let restored = libp2p::identity::Keypair::from_protobuf_encoding(&encoded)
+            .expect("decode saved identity");
+        assert_eq!(
+            original.public().encode_protobuf(),
+            restored.public().encode_protobuf()
+        );
     }
 
     #[test]
