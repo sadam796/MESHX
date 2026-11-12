@@ -573,6 +573,7 @@ pub enum MailboxRejectReason {
     Unauthorized,
     InvalidEnvelope,
     QueueFull,
+    RateLimited,
     StorageUnavailable,
 }
 
