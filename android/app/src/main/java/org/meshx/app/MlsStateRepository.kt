@@ -28,6 +28,23 @@ internal class MlsStateRepository(context: Context) {
     }
 
 
+
+    /**
+     * Creates a signed one-use MLS KeyPackage, saves its private init key material
+     * inside the Keystore-encrypted vault, and returns only the public package.
+     * The caller must deliver the returned bytes securely and avoid reusing them.
+     */
+    fun createAndSaveKeyPackage(recordId: String, credentialIdentity: ByteArray): ByteArray {
+        val snapshot = NativeMeshx.createMlsKeyPackageSnapshot(credentialIdentity)
+        try {
+            val publicPackage = NativeMeshx.extractMlsKeyPackage(snapshot)
+            vault.save(recordId, snapshot)
+            return publicPackage
+        } finally {
+            snapshot.fill(0)
+        }
+    }
+
     /** Creates an RFC 9420 group and immediately encrypts its state at rest. */
     fun createAndSaveGroupState(recordId: String, credentialIdentity: ByteArray) {
         val snapshot = NativeMeshx.createMlsGroupSnapshot(credentialIdentity)
