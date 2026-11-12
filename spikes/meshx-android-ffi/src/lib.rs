@@ -457,20 +457,13 @@ pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativePollIncomingCipherte
         Err(_) => return jni_string(&mut env, "[]".to_owned()),
     };
     let expected_sender = peer_id.to_bytes();
+    // Peek rather than drain: Android explicitly acknowledges each message
+    // only after MLS authentication and encrypted local persistence succeed.
     let messages = match incoming_messages().lock() {
-        Ok(mut queue) => {
-            let mut selected = Vec::new();
-            let mut retained = VecDeque::new();
-            while let Some(message) = queue.pop_front() {
-                if message.sender_id.as_slice() == expected_sender.as_slice() {
-                    selected.push(message);
-                } else {
-                    retained.push_back(message);
-                }
-            }
-            *queue = retained;
-            selected
-        }
+        Ok(queue) => queue.iter()
+            .filter(|message| message.sender_id.as_slice() == expected_sender.as_slice())
+            .cloned()
+            .collect::<Vec<_>>(),
         Err(_) => return jni_string(&mut env, "[]".to_owned()),
     };
     // Expose the authenticated libp2p sender ID beside the opaque MLS bytes so
@@ -480,11 +473,44 @@ pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativePollIncomingCipherte
         Some(serde_json::json!({
             "sender_peer_id": sender_peer_id,
             "ciphertext": message.ciphertext,
-            "message_id": message.message_id,
+            "message_id": message.message_id.iter()
+                .map(|byte| format!("{byte:02x}")).collect::<String>(),
         }))
     }).collect::<Vec<_>>();
     let json = serde_json::to_string(&payloads).unwrap_or_else(|_| "[]".to_owned());
     jni_string(&mut env, json)
+}
+
+/// Kotlin: NativeMeshx.nativeAckIncomingCiphertext(messageId)
+/// Removes a received envelope only after Android confirms successful processing.
+#[no_mangle]
+pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeAckIncomingCiphertext(
+    mut env: JNIEnv,
+    _this: JObject,
+    raw_message_id: JString,
+) -> jboolean {
+    let value = match env.get_string(&raw_message_id) {
+        Ok(value) => value.to_string_lossy().into_owned(),
+        Err(_) => return JNI_FALSE,
+    };
+    if value.len() != 32 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return JNI_FALSE;
+    }
+    let mut message_id = [0u8; 16];
+    for index in 0..16 {
+        match u8::from_str_radix(&value[index * 2..index * 2 + 2], 16) {
+            Ok(byte) => message_id[index] = byte,
+            Err(_) => return JNI_FALSE,
+        }
+    }
+    match incoming_messages().lock() {
+        Ok(mut queue) => {
+            let before = queue.len();
+            queue.retain(|message| message.message_id != message_id);
+            if queue.len() < before { JNI_TRUE } else { JNI_FALSE }
+        }
+        Err(_) => JNI_FALSE,
+    }
 }
 
 /// Kotlin: NativeMeshx.nativeGenerateIdentity()
