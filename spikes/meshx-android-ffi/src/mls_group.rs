@@ -409,3 +409,28 @@ pub fn add_member_to_group_snapshot(
         ratchet_tree,
     }).map_err(|error| format!("MLS invitation encoding failed: {error}"))
 }
+
+
+#[cfg(test)]
+mod invitation_tests {
+    use super::*;
+
+    #[test]
+    fn persisted_group_accepts_verified_contact_key_package_and_exports_welcome() {
+        let alice_group = create_group_snapshot(b"meshx-invite-alice")
+            .expect("create sender group");
+        let bob_key_package_snapshot = create_key_package_snapshot(b"meshx-invite-bob")
+            .expect("create recipient KeyPackage snapshot");
+        let bob_public_key_package = extract_key_package(&bob_key_package_snapshot)
+            .expect("extract verified recipient KeyPackage");
+        let invitation = add_member_to_group_snapshot(&alice_group, &bob_public_key_package)
+            .expect("add recipient and export invitation");
+        let invitation: GroupInvitationSnapshot = serde_json::from_slice(&invitation)
+            .expect("decode invitation bundle");
+        assert_eq!(invitation.version, SNAPSHOT_VERSION);
+        assert!(!invitation.welcome_message.is_empty());
+        assert!(!invitation.ratchet_tree.is_empty());
+        validate_group_snapshot(&invitation.updated_group_snapshot)
+            .expect("updated sender group remains restorable");
+    }
+}
