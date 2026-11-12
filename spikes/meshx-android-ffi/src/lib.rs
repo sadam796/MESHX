@@ -672,3 +672,44 @@ mod tests {
         assert!(current_status().contains("not started"));
     }
 }
+
+
+/// Kotlin: NativeMeshx.nativeMlsCreateKeyPackageSnapshot(identity: ByteArray)
+/// Creates a one-use KeyPackage and returns private provider state for vault encryption.
+#[no_mangle]
+pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeMlsCreateKeyPackageSnapshot(
+    mut env: JNIEnv,
+    _this: JObject,
+    identity: JByteArray,
+) -> jbyteArray {
+    match env.convert_byte_array(&identity)
+        .map_err(|error| format!("MLS identity could not be read: {error}"))
+        .and_then(|bytes| mls_group::create_key_package_snapshot(&bytes)) {
+        Ok(bytes) => env.byte_array_from_slice(&bytes)
+            .map(|array| array.into_raw()).unwrap_or(std::ptr::null_mut()),
+        Err(error) => {
+            set_status(format!("MESHX MLS KeyPackage error: {error}"));
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Kotlin: NativeMeshx.nativeMlsExtractKeyPackage(snapshot: ByteArray)
+/// Restores and validates the public KeyPackage before it is shared with a contact.
+#[no_mangle]
+pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeMlsExtractKeyPackage(
+    mut env: JNIEnv,
+    _this: JObject,
+    snapshot: JByteArray,
+) -> jbyteArray {
+    match env.convert_byte_array(&snapshot)
+        .map_err(|error| format!("MLS snapshot could not be read: {error}"))
+        .and_then(|bytes| mls_group::extract_key_package(&bytes)) {
+        Ok(bytes) => env.byte_array_from_slice(&bytes)
+            .map(|array| array.into_raw()).unwrap_or(std::ptr::null_mut()),
+        Err(error) => {
+            set_status(format!("MESHX MLS KeyPackage validation error: {error}"));
+            std::ptr::null_mut()
+        }
+    }
+}
