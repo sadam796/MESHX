@@ -774,3 +774,56 @@ pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeMlsJoinGroupFromWelc
         }
     }
 }
+
+
+/// Kotlin: NativeMeshx.nativeMlsEncryptApplicationMessage(groupSnapshot, plaintext)
+/// Returns JSON bundle containing advanced sender state and MLS ciphertext.
+#[no_mangle]
+pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeMlsEncryptApplicationMessage(
+    mut env: JNIEnv,
+    _this: JObject,
+    group_snapshot: JByteArray,
+    plaintext: JByteArray,
+) -> jbyteArray {
+    let result = env.convert_byte_array(&group_snapshot)
+        .map_err(|error| format!("MLS group state could not be read: {error}"))
+        .and_then(|state| {
+            env.convert_byte_array(&plaintext)
+                .map_err(|error| format!("Message plaintext could not be read: {error}"))
+                .and_then(|message| mls_group::encrypt_group_application_message(&state, &message))
+        });
+    match result {
+        Ok(bytes) => env.byte_array_from_slice(&bytes)
+            .map(|array| array.into_raw()).unwrap_or(std::ptr::null_mut()),
+        Err(error) => {
+            set_status(format!("MESHX MLS encryption error: {error}"));
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Kotlin: NativeMeshx.nativeMlsDecryptApplicationMessage(groupSnapshot, ciphertext)
+/// Returns JSON bundle containing advanced receiver state and authenticated plaintext.
+#[no_mangle]
+pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeMlsDecryptApplicationMessage(
+    mut env: JNIEnv,
+    _this: JObject,
+    group_snapshot: JByteArray,
+    ciphertext: JByteArray,
+) -> jbyteArray {
+    let result = env.convert_byte_array(&group_snapshot)
+        .map_err(|error| format!("MLS group state could not be read: {error}"))
+        .and_then(|state| {
+            env.convert_byte_array(&ciphertext)
+                .map_err(|error| format!("MLS ciphertext could not be read: {error}"))
+                .and_then(|message| mls_group::decrypt_group_application_message(&state, &message))
+        });
+    match result {
+        Ok(bytes) => env.byte_array_from_slice(&bytes)
+            .map(|array| array.into_raw()).unwrap_or(std::ptr::null_mut()),
+        Err(error) => {
+            set_status(format!("MESHX MLS decryption error: {error}"));
+            std::ptr::null_mut()
+        }
+    }
+}
