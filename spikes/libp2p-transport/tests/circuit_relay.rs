@@ -69,6 +69,10 @@ async fn two_clients_can_connect_through_a_local_circuit_relay() {
     .await
     .expect("relay server did not start listening");
 
+    // Match a public relay deployment: advertise the address that clients
+    // should embed in their circuit multiaddresses.
+    server.add_external_address(server_address.clone());
+
     let client_a_key = identity::Keypair::generate_ed25519();
     let client_a_peer = client_a_key.public().to_peer_id();
     let mut client_a = relay_client(client_a_key);
