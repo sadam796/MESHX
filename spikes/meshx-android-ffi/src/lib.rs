@@ -232,7 +232,7 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
                                 SwarmEvent::Behaviour(meshx_libp2p_transport_spike::MeshxEvent::Delivery(event)) => {
                                     use libp2p::request_response::{Event as RequestEvent, Message as RequestMessage};
                                     match event {
-                                        RequestEvent::Message { peer, message } => match message {
+                                        RequestEvent::Message { peer, message, .. } => match message {
                                             RequestMessage::Request { request, channel, .. } => {
                                                 let now = unix_time_seconds();
                                                 let local_id = swarm.local_peer_id().to_bytes();
