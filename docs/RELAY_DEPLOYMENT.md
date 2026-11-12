@@ -11,7 +11,7 @@ This repository now contains a self-hostable libp2p circuit-relay v2 server bina
 
 The server now exposes an experimental durable mailbox protocol at /meshx/mailbox/1 in addition to circuit-relay v2. An authenticated sender can store an already-encrypted envelope; the recipient can fetch envelopes addressed to its authenticated Peer ID and acknowledge each only after durable local save. Fetch does not delete messages. The disk-backed queue survives server restarts and retains replay markers until message expiry.
 
-The mailbox protocol is not yet integrated into the Android app, and a full Android-to-server mailbox exchange has not yet been verified. Do not describe offline delivery as working in the app yet.
+The Android native transport now includes an experimental mailbox client: it sends Store requests to configured relays, polls Fetch periodically, and sends recipient Acknowledge requests after the app's encrypted local-save flow. This client has not yet been verified against a running public relay or on two physical Android devices. Do not describe public offline delivery as verified.
 
 ## Deploy on a Linux VPS
 
@@ -40,7 +40,7 @@ The Compose volume `meshx-relay-data` preserves the private relay identity. Back
 ## Release and security limitations
 
 - This server has not been deployed to a public host from this repository.
-- The Android app does not yet connect to this relay; no real-world cross-network message delivery is claimed.
+- Android now has experimental mailbox client wiring, but a running Android-to-server exchange and real-world cross-network message delivery have not yet been verified.
 - Circuit relay v2 forwards live peer traffic; it does not store messages for offline recipients.
 - Mailbox requests are authenticated against the libp2p Peer ID established by the Noise connection: store requires sender_id to match the connected peer; fetch is scoped to that peer; acknowledgement can delete only a message addressed to that peer.
 - The mailbox stores encrypted message envelopes, but routing metadata is visible to the relay and is not encrypted at rest. The mailbox directory is created with mode 0700 and files with mode 0600 on Unix-like hosts.
