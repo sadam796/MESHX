@@ -82,8 +82,11 @@ async fn two_clients_can_connect_through_a_local_circuit_relay() {
 
         loop {
             tokio::select! {
-                _ = server.select_next_some() => {}
+                event = server.select_next_some() => {
+                    println!("relay server event: {event:?}");
+                }
                 event = client_a.select_next_some() => {
+                    println!("client A event: {event:?}");
                     if let SwarmEvent::NewListenAddr { address, .. } = event {
                         if address.iter().any(|part| matches!(part, Protocol::P2pCircuit)) {
                             assert!(
@@ -98,6 +101,7 @@ async fn two_clients_can_connect_through_a_local_circuit_relay() {
                     }
                 }
                 event = client_b.select_next_some() => {
+                    println!("client B event: {event:?}");
                     match event {
                         SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. }
                             if peer_id == client_a_peer =>
