@@ -111,10 +111,27 @@ fn parse_bootstrap_input(raw: &str) -> Result<Vec<String>, String> {
 fn parse_relay_address(raw: &str) -> Result<Multiaddr, String> {
     let address = raw.trim().parse::<Multiaddr>()
         .map_err(|_| "Invalid relay multiaddress.".to_owned())?;
+    if address.iter().any(|part| matches!(part, Protocol::P2pCircuit)) {
+        return Err("Enter the relay server's direct address, without /p2p-circuit.".to_owned());
+    }
     if !matches!(address.iter().last(), Some(Protocol::P2p(_))) {
         return Err("Relay address must end with /p2p/RELAY_PEER_ID.".to_owned());
     }
     Ok(address)
+}
+
+/// Converts the listener address emitted after a relay reservation into the
+/// direct relay address used to build outbound circuit paths.
+fn relay_base_from_circuit_listen_address(address: &Multiaddr) -> Option<Multiaddr> {
+    let mut relay_address = address.clone();
+    match relay_address.pop() {
+        Some(Protocol::P2p(_)) => {}
+        _ => return None,
+    }
+    match relay_address.pop() {
+        Some(Protocol::P2pCircuit) => Some(relay_address),
+        _ => None,
+    }
 }
 
 fn queue_relay_peer(raw: &str) -> Result<String, String> {
@@ -194,7 +211,8 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
             };
 
             runtime.block_on(async move {
-                let mut configured_relays: Vec<Multiaddr> = Vec::new();
+                let mut requested_relays: Vec<Multiaddr> = Vec::new();
+                let mut active_relays: Vec<Multiaddr> = Vec::new();
                 let builder = match SwarmBuilder::with_existing_identity(keypair)
                     .with_tokio()
                     .with_tcp(
@@ -262,9 +280,31 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
                         event = swarm.select_next_some() => {
                             match event {
                                 SwarmEvent::NewListenAddr { address, .. } => {
-                                    set_status(format!(
-                                        "MESHX libp2p TCP listener active; peer id {thread_peer_label}; address {address}"
-                                    ));
+                                    if address.iter().any(|part| matches!(part, Protocol::P2pCircuit)) {
+                                        match relay_base_from_circuit_listen_address(&address) {
+                                            Some(relay_address) => {
+                                                if requested_relays.contains(&relay_address)
+                                                    && !active_relays.contains(&relay_address) {
+                                                    active_relays.push(relay_address.clone());
+                                                }
+                                                let relay_peer = relay_address.iter().last()
+                                                    .and_then(|part| match part {
+                                                        Protocol::P2p(peer) => Some(peer),
+                                                        _ => None,
+                                                    });
+                                                set_status(format!(
+                                                    "MESHX relay reservation confirmed for {relay_peer:?}; relay routes are now available; circuit address {address}; local peer id {thread_peer_label}"
+                                                ));
+                                            }
+                                            None => set_status(format!(
+                                                "MESHX received an invalid relay listener address: {address}"
+                                            )),
+                                        }
+                                    } else {
+                                        set_status(format!(
+                                            "MESHX libp2p TCP listener active; peer id {thread_peer_label}; address {address}"
+                                        ));
+                                    }
                                 }
                                 SwarmEvent::ListenerError { error, .. } => {
                                     set_status(format!("MESHX listener error: {error}"));
@@ -275,9 +315,21 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
                                     ));
                                 }
                                 SwarmEvent::ConnectionClosed { peer_id, .. } => {
-                                    set_status(format!(
-                                        "MESHX peer disconnected: {peer_id}; local peer id {thread_peer_label}"
-                                    ));
+                                    let relay_closed = active_relays.iter().any(|address| {
+                                        address.iter().any(|part| matches!(part, Protocol::P2p(id) if *id == peer_id))
+                                    });
+                                    if relay_closed {
+                                        active_relays.retain(|address| {
+                                            !address.iter().any(|part| matches!(part, Protocol::P2p(id) if *id == peer_id))
+                                        });
+                                        set_status(format!(
+                                            "MESHX relay connection closed: {peer_id}; its circuit route is no longer marked active; local peer id {thread_peer_label}"
+                                        ));
+                                    } else {
+                                        set_status(format!(
+                                            "MESHX peer disconnected: {peer_id}; local peer id {thread_peer_label}"
+                                        ));
+                                    }
                                 }
                                 SwarmEvent::Behaviour(MeshxAndroidEvent::Meshx(meshx_libp2p_transport_spike::MeshxEvent::Kad(event))) => {
                                     set_status(format!(
@@ -356,8 +408,8 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
                                                 Ok(()) => {
                                                     match swarm.listen_on(reservation_address) {
                                                         Ok(listener_id) => {
-                                                            if !configured_relays.contains(&relay_address) {
-                                                                configured_relays.push(relay_address.clone());
+                                                            if !requested_relays.contains(&relay_address) {
+                                                                requested_relays.push(relay_address.clone());
                                                             }
                                                             set_status(format!(
                                                                 "MESHX relay dial queued for {relay_peer}; circuit reservation listener {listener_id:?} requested. This is not yet a confirmed reservation."
@@ -429,7 +481,7 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
                                     };
                                     match envelope.validate(now) {
                                         Ok(()) => {
-                                            for relay_address in &configured_relays {
+                                            for relay_address in &active_relays {
                                                 let mut circuit = relay_address.clone();
                                                 circuit.push(Protocol::P2pCircuit);
                                                 circuit.push(Protocol::P2p(peer_id));
@@ -439,7 +491,7 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
                                                 }
                                             }
                                             swarm.behaviour_mut().meshx.delivery.send_request(&peer_id, envelope);
-                                            set_status(format!("MESHX encrypted-payload request queued for {peer_id}; direct/DHT and configured relay routes may be tried. Waiting for remote acknowledgement; this is not offline mailbox delivery."));
+                                            set_status(format!("MESHX encrypted-payload request queued for {peer_id}; {} confirmed relay route(s) available plus direct/DHT paths. Waiting for remote acknowledgement; this is not offline mailbox delivery.", active_relays.len()));
                                         }
                                         Err(error) => set_status(format!("MESHX rejected outgoing encrypted payload: {error:?}")),
                                     }
@@ -828,6 +880,31 @@ mod tests {
             format!("/ip4/127.0.0.1/tcp/4001/p2p/{peer}")
         }).collect();
         assert!(parse_bootstrap_input(&addresses.join("\n")).is_err());
+    }
+
+    #[test]
+    fn relay_address_requires_a_peer_id_and_rejects_circuit_suffix() {
+        let relay_peer = libp2p::identity::Keypair::generate_ed25519().public().to_peer_id();
+        let direct = format!("/ip4/127.0.0.1/tcp/4001/p2p/{relay_peer}");
+        assert_eq!(parse_relay_address(&direct).unwrap().to_string(), direct);
+        assert!(parse_relay_address("/ip4/127.0.0.1/tcp/4001").is_err());
+        assert!(parse_relay_address(&format!("{direct}/p2p-circuit")).is_err());
+    }
+
+    #[test]
+    fn confirmed_circuit_listener_address_maps_to_direct_relay_address() {
+        let relay_peer = libp2p::identity::Keypair::generate_ed25519().public().to_peer_id();
+        let local_peer = libp2p::identity::Keypair::generate_ed25519().public().to_peer_id();
+        let direct = format!("/ip4/127.0.0.1/tcp/4001/p2p/{relay_peer}");
+        let circuit: Multiaddr = format!("{direct}/p2p-circuit/p2p/{local_peer}")
+            .parse()
+            .expect("valid circuit listener address");
+        assert_eq!(
+            relay_base_from_circuit_listen_address(&circuit).unwrap().to_string(),
+            direct
+        );
+        let malformed: Multiaddr = direct.parse().expect("valid direct address");
+        assert!(relay_base_from_circuit_listen_address(&malformed).is_none());
     }
 
     #[test]
