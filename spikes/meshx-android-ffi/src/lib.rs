@@ -309,6 +309,21 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
                                 SwarmEvent::ListenerError { error, .. } => {
                                     set_status(format!("MESHX listener error: {error}"));
                                 }
+                                SwarmEvent::ListenerClosed { listener_id, addresses, reason } => {
+                                    match reason {
+                                        Ok(()) => set_status(format!(
+                                            "MESHX listener {listener_id:?} closed without an error; addresses: {addresses:?}. A relay route is active only if a reservation was confirmed."
+                                        )),
+                                        Err(error) => set_status(format!(
+                                            "MESHX listener {listener_id:?} closed: {error}; addresses: {addresses:?}"
+                                        )),
+                                    }
+                                }
+                                SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
+                                    set_status(format!(
+                                        "MESHX outgoing connection to {peer_id:?} failed: {error}"
+                                    ));
+                                }
                                 SwarmEvent::ConnectionEstablished { peer_id, .. } => {
                                     set_status(format!(
                                         "MESHX libp2p connected to peer {peer_id}; local peer id {thread_peer_label}"
@@ -408,26 +423,21 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
                                             };
                                             let mut reservation_address = relay_address.clone();
                                             reservation_address.push(Protocol::P2pCircuit);
-                                            let dial_result = if swarm.is_connected(&relay_peer) {
-                                                Ok(())
-                                            } else {
-                                                swarm.dial(relay_address.clone())
-                                            };
-                                            match dial_result {
-                                                Ok(()) => {
-                                                    match swarm.listen_on(reservation_address) {
-                                                        Ok(listener_id) => {
-                                                            if !requested_relays.contains(&relay_address) {
-                                                                requested_relays.push(relay_address.clone());
-                                                            }
-                                                            set_status(format!(
-                                                                "MESHX relay dial queued for {relay_peer}; circuit reservation listener {listener_id:?} requested. This is not yet a confirmed reservation."
-                                                            ));
-                                                        }
-                                                        Err(error) => set_status(format!("MESHX relay connection requested but reservation failed: {error}")),
+                                            // The relay-client transport initiates the relay dial
+                                            // when listen_on is called. A separate swarm.dial here
+                                            // races the reservation and can close the listener.
+                                            match swarm.listen_on(reservation_address) {
+                                                Ok(listener_id) => {
+                                                    if !requested_relays.contains(&relay_address) {
+                                                        requested_relays.push(relay_address.clone());
                                                     }
+                                                    set_status(format!(
+                                                        "MESHX relay {relay_peer}: circuit reservation listener {listener_id:?} requested; waiting for server confirmation."
+                                                    ));
                                                 }
-                                                Err(error) => set_status(format!("MESHX relay dial failed for {relay_peer}: {error}")),
+                                                Err(error) => set_status(format!(
+                                                    "MESHX relay reservation request failed for {relay_peer}: {error}"
+                                                )),
                                             }
                                         }
                                         Err(error) => set_status(format!("MESHX relay address rejected: {error}")),
