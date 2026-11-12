@@ -516,3 +516,105 @@ mod invitation_join_tests {
             .expect("recipient joined group restores with its own signer");
     }
 }
+
+
+#[derive(Serialize, Deserialize)]
+pub struct EncryptedApplicationSnapshot {
+    pub version: u32,
+    pub updated_group_snapshot: Vec<u8>,
+    pub ciphertext: Vec<u8>,
+}
+
+/// Encrypts plaintext as an MLS application message and returns the advanced
+/// sender ratchet state together with the opaque TLS-serialized ciphertext.
+pub fn encrypt_group_application_message(
+    group_snapshot_bytes: &[u8],
+    plaintext: &[u8],
+) -> Result<Vec<u8>, String> {
+    use openmls::prelude::tls_codec::Serialize;
+
+    if group_snapshot_bytes.is_empty() || plaintext.is_empty() || plaintext.len() > 1_000_000 {
+        return Err("MLS group state and a 1-byte to 1-MiB plaintext are required".to_owned());
+    }
+    let snapshot: GroupSnapshot = serde_json::from_slice(group_snapshot_bytes)
+        .map_err(|error| format!("MLS group snapshot is invalid: {error}"))?;
+    if snapshot.version != SNAPSHOT_VERSION || snapshot.group_id.is_empty() {
+        return Err("MLS group snapshot version or group ID is invalid".to_owned());
+    }
+    let provider = OpenMlsRustCrypto::default();
+    provider.storage().values.write()
+        .map_err(|_| "OpenMLS provider storage lock is poisoned".to_owned())?
+        .extend(snapshot.entries);
+    let signer = SignatureKeyPair::read(
+        provider.storage(), &snapshot.signer_public, MLS_CIPHERSUITE.signature_algorithm()
+    ).ok_or_else(|| "MLS group signing key is missing".to_owned())?;
+    let group_id = openmls::prelude::GroupId::from_slice(&snapshot.group_id);
+    let mut group = MlsGroup::load(provider.storage(), &group_id)
+        .map_err(|error| format!("MLS group restore failed: {error:?}"))?
+        .ok_or_else(|| "MLS group was not found".to_owned())?;
+    let message = group.create_message(&provider, &signer, plaintext)
+        .map_err(|error| format!("MLS application encryption failed: {error:?}"))?;
+    let ciphertext = message.tls_serialize_detached()
+        .map_err(|error| format!("MLS ciphertext serialization failed: {error:?}"))?;
+    let entries = provider.storage().values.read()
+        .map_err(|_| "OpenMLS provider storage lock is poisoned".to_owned())?
+        .iter().map(|(key, value)| (key.clone(), value.clone())).collect();
+    let updated_group_snapshot = serde_json::to_vec(&GroupSnapshot {
+        version: SNAPSHOT_VERSION,
+        group_id: group.group_id().as_slice().to_vec(),
+        signer_public: signer.public().to_vec(),
+        entries,
+    }).map_err(|error| format!("Updated sender MLS state encoding failed: {error}"))?;
+    serde_json::to_vec(&EncryptedApplicationSnapshot {
+        version: SNAPSHOT_VERSION, updated_group_snapshot, ciphertext,
+    }).map_err(|error| format!("MLS encrypted application bundle encoding failed: {error}"))
+}
+
+/// Authenticates and decrypts an MLS application message, returning the advanced
+/// receiver ratchet state and plaintext only after OpenMLS verifies the message.
+pub fn decrypt_group_application_message(
+    group_snapshot_bytes: &[u8],
+    ciphertext_bytes: &[u8],
+) -> Result<Vec<u8>, String> {
+    use openmls::framing::{MlsMessageIn, ProcessedMessageContent};
+    use openmls::prelude::DeserializeBytes;
+
+    if group_snapshot_bytes.is_empty() || ciphertext_bytes.is_empty() {
+        return Err("MLS group state and ciphertext are required".to_owned());
+    }
+    let snapshot: GroupSnapshot = serde_json::from_slice(group_snapshot_bytes)
+        .map_err(|error| format!("MLS group snapshot is invalid: {error}"))?;
+    if snapshot.version != SNAPSHOT_VERSION || snapshot.group_id.is_empty() {
+        return Err("MLS group snapshot version or group ID is invalid".to_owned());
+    }
+    let provider = OpenMlsRustCrypto::default();
+    provider.storage().values.write()
+        .map_err(|_| "OpenMLS provider storage lock is poisoned".to_owned())?
+        .extend(snapshot.entries);
+    let group_id = openmls::prelude::GroupId::from_slice(&snapshot.group_id);
+    let mut group = MlsGroup::load(provider.storage(), &group_id)
+        .map_err(|error| format!("MLS group restore failed: {error:?}"))?
+        .ok_or_else(|| "MLS group was not found".to_owned())?;
+    let message = MlsMessageIn::tls_deserialize_exact_bytes(ciphertext_bytes)
+        .map_err(|error| format!("MLS ciphertext decoding failed: {error:?}"))?;
+    let protocol_message = message.try_into_protocol_message()
+        .map_err(|error| format!("MLS protocol message conversion failed: {error:?}"))?;
+    let processed = group.process_message(&provider, protocol_message)
+        .map_err(|error| format!("MLS message authentication/decryption failed: {error:?}"))?;
+    let plaintext = match processed.into_content() {
+        ProcessedMessageContent::ApplicationMessage(message) => message.into_bytes(),
+        _ => return Err("Received MLS message is not an application message".to_owned()),
+    };
+    let entries = provider.storage().values.read()
+        .map_err(|_| "OpenMLS provider storage lock is poisoned".to_owned())?
+        .iter().map(|(key, value)| (key.clone(), value.clone())).collect();
+    let updated_group_snapshot = serde_json::to_vec(&GroupSnapshot {
+        version: SNAPSHOT_VERSION,
+        group_id: group.group_id().as_slice().to_vec(),
+        signer_public: snapshot.signer_public,
+        entries,
+    }).map_err(|error| format!("Updated receiver MLS state encoding failed: {error}"))?;
+    serde_json::to_vec(&EncryptedApplicationSnapshot {
+        version: SNAPSHOT_VERSION, updated_group_snapshot, ciphertext: plaintext,
+    }).map_err(|error| format!("MLS decrypted application bundle encoding failed: {error}"))
+}
