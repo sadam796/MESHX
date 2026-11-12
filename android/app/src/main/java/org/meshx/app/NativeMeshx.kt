@@ -21,7 +21,7 @@ internal object NativeMeshx {
     private external fun nativeTransportPeerId(publicKey: ByteArray): String
     private external fun nativeFindPeer(peerId: String): String
     private external fun nativeSendCiphertext(peerId: String, ciphertext: ByteArray): String
-    private external fun nativePollIncomingCiphertexts(): String
+    private external fun nativePollIncomingCiphertexts(peerId: String): String
     private external fun nativeStartTransport(identity: ByteArray): String
     private external fun nativeAddBootstrapPeers(addresses: String): String
     private external fun nativeMlsCreateSignerSnapshot(): ByteArray
@@ -89,11 +89,11 @@ internal object NativeMeshx {
         "MESHX send error: Native method unavailable: ${error.message ?: "unknown JNI error"}"
     }
 
-    /** Returns and clears ciphertext envelopes waiting in the bounded volatile receive queue. */
-    fun pollIncomingCiphertexts(): String = loadError?.let {
+    /** Returns only ciphertext envelopes from this contact, leaving other senders queued. */
+    fun pollIncomingCiphertexts(peerId: String): String = loadError?.let {
         "[]"
     } ?: try {
-        nativePollIncomingCiphertexts()
+        nativePollIncomingCiphertexts(peerId)
     } catch (error: UnsatisfiedLinkError) {
         "[]"
     }
