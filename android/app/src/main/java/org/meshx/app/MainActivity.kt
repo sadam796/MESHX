@@ -345,6 +345,13 @@ private fun MeshxHome() {
     var selectedChat by remember { mutableStateOf<String?>(null) }
     var messageDraft by remember { mutableStateOf("") }
     var localMessages by remember { mutableStateOf(loadLocalMessages(prefs)) }
+    val mlsRepository = remember { MlsStateRepository(context) }
+    var mlsChatStatus by remember { mutableStateOf<String?>(null) }
+    var mlsKeyPackageText by remember { mutableStateOf("") }
+    var mlsInvitationText by remember { mutableStateOf("") }
+    var mlsCiphertextText by remember { mutableStateOf("") }
+    var mlsIncomingCiphertextText by remember { mutableStateOf("") }
+    var mlsBusy by remember { mutableStateOf(false) }
     val persistContactIdentity: (String, ParsedPublicIdentity) -> Unit = { raw, parsed ->
         val id = parsed.fingerprint
         val updated = (contacts + id).distinct()
@@ -536,55 +543,98 @@ private fun MeshxHome() {
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.fillMaxWidth().padding(16.dp)) {
                             Text("Chat with $chatId", style = MaterialTheme.typography.titleMedium)
-                            Text(
-                                "LOCAL PROTOTYPE — saved only on this phone. No Internet delivery or end-to-end encryption yet.",
-                                color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            Spacer(Modifier.height(12.dp))
-                            val chatEntries = localMessages.mapNotNull { entry ->
-                                val parts = entry.split("#", limit = 3)
-                                if (parts.size == 3 && parts[0] == chatId) {
-                                    try {
-                                        parts[1].toLong() to String(Base64.decode(parts[2], Base64.DEFAULT), Charsets.UTF_8)
-                                    } catch (_: Exception) { null }
-                                } else null
-                            }.sortedBy { it.first }
-                            if (chatEntries.isEmpty()) {
-                                Text("No local messages yet.")
-                            } else {
-                                chatEntries.forEach { (_, body) ->
-                                    Surface(
-                                        color = MaterialTheme.colorScheme.secondaryContainer,
-                                        shape = MaterialTheme.shapes.medium,
-                                        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
-                                    ) {
-                                        Text(body, Modifier.padding(10.dp))
+                            Text("MLS encryption setup: invitation aur ciphertext copy/paste se exchange honge. Internet delivery agle phase mein connect hogi.", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+                            val ownIdentity = identity ?: runCatching { loadOrCreateIdentity(prefs).also { identity = it } }.getOrNull()
+                            val groupRecordId = ownIdentity?.let { "meshx-chat-" + listOf(it.fingerprint, chatId).sorted().joinToString("-") }
+                            val keyPackageRecordId = ownIdentity?.let { "meshx-keypackage-" + it.fingerprint + "-" + chatId }
+                            mlsChatStatus?.let { Text(it, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall) }
+                            Text("1. Recipient: create one-time KeyPackage", style = MaterialTheme.typography.titleSmall)
+                            Button(enabled = !mlsBusy && ownIdentity != null && keyPackageRecordId != null, onClick = {
+                                mlsBusy = true
+                                try {
+                                    val bytes = mlsRepository.createAndSaveKeyPackage(keyPackageRecordId!!, ownIdentity!!.fingerprint.toByteArray(Charsets.UTF_8))
+                                    mlsKeyPackageText = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                                    bytes.fill(0)
+                                    mlsChatStatus = "KeyPackage ready. Is public code ko inviter ko share karein."
+                                } catch (e: Exception) { mlsChatStatus = "KeyPackage error: ${e.localizedMessage ?: "unknown"}" }
+                                finally { mlsBusy = false }
+                            }) { Text("Create my KeyPackage") }
+                            OutlinedTextField(value = mlsKeyPackageText, onValueChange = { mlsKeyPackageText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Public KeyPackage") }, minLines = 2)
+                            Text("2. Inviter: create group and invitation", style = MaterialTheme.typography.titleSmall)
+                            Button(enabled = !mlsBusy && ownIdentity != null && groupRecordId != null && mlsKeyPackageText.isNotBlank(), onClick = {
+                                mlsBusy = true
+                                try {
+                                    if (!mlsRepository.restoreAndValidateGroupState(groupRecordId!!)) {
+                                        mlsRepository.createAndSaveGroupState(groupRecordId, ownIdentity!!.fingerprint.toByteArray(Charsets.UTF_8))
                                     }
-                                }
-                            }
-                            OutlinedTextField(
-                                value = messageDraft,
-                                onValueChange = { messageDraft = it },
-                                modifier = Modifier.fillMaxWidth(),
-                                label = { Text("Write a local test message") },
-                                minLines = 2
-                            )
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Button(onClick = {
-                                    val body = messageDraft.trim()
-                                    if (body.isNotEmpty()) {
-                                        val encoded = Base64.encodeToString(body.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+                                    val invite = mlsRepository.addContactToGroup(groupRecordId, Base64.decode(mlsKeyPackageText.trim(), Base64.DEFAULT))
+                                    val bundle = JSONObject().put("version", 1)
+                                        .put("welcome", Base64.encodeToString(invite.welcomeMessage, Base64.NO_WRAP))
+                                        .put("tree", Base64.encodeToString(invite.ratchetTree, Base64.NO_WRAP))
+                                    mlsInvitationText = Base64.encodeToString(bundle.toString().toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+                                    invite.welcomeMessage.fill(0); invite.ratchetTree.fill(0)
+                                    mlsChatStatus = "Invitation created. Recipient ko code share karein."
+                                } catch (e: Exception) { mlsChatStatus = "Invitation error: ${e.localizedMessage ?: "unknown"}" }
+                                finally { mlsBusy = false }
+                            }) { Text("Create encrypted invitation") }
+                            OutlinedTextField(value = mlsInvitationText, onValueChange = { mlsInvitationText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Welcome invitation code") }, minLines = 2)
+                            Text("3. Recipient: paste invitation and join", style = MaterialTheme.typography.titleSmall)
+                            Button(enabled = !mlsBusy && ownIdentity != null && groupRecordId != null && keyPackageRecordId != null && mlsInvitationText.isNotBlank(), onClick = {
+                                mlsBusy = true
+                                try {
+                                    val bundle = JSONObject(String(Base64.decode(mlsInvitationText.trim(), Base64.DEFAULT), Charsets.UTF_8))
+                                    require(bundle.getInt("version") == 1) { "Unsupported invitation version." }
+                                    val welcome = Base64.decode(bundle.getString("welcome"), Base64.DEFAULT)
+                                    val tree = Base64.decode(bundle.getString("tree"), Base64.DEFAULT)
+                                    try { mlsRepository.joinAndSaveInvitedGroup(keyPackageRecordId!!, groupRecordId!!, welcome, tree) }
+                                    finally { welcome.fill(0); tree.fill(0) }
+                                    mlsChatStatus = "MLS group join successful."
+                                } catch (e: Exception) { mlsChatStatus = "Group join error: ${e.localizedMessage ?: "unknown"}" }
+                                finally { mlsBusy = false }
+                            }) { Text("Join encrypted chat") }
+                            Divider()
+                            Text("4. Encrypt and exchange messages", style = MaterialTheme.typography.titleSmall)
+                            OutlinedTextField(value = messageDraft, onValueChange = { messageDraft = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Message to encrypt") }, minLines = 2)
+                            Button(enabled = !mlsBusy && groupRecordId != null && messageDraft.isNotBlank() && runCatching { mlsRepository.restoreAndValidateGroupState(groupRecordId) }.getOrDefault(false), onClick = {
+                                mlsBusy = true
+                                try {
+                                    val ciphertext = mlsRepository.encryptAndAdvanceGroupState(groupRecordId!!, messageDraft.trim().toByteArray(Charsets.UTF_8))
+                                    mlsCiphertextText = Base64.encodeToString(ciphertext, Base64.NO_WRAP)
+                                    ciphertext.fill(0); messageDraft = ""
+                                    mlsChatStatus = "MLS encrypted message ready. Ciphertext recipient ko share karein."
+                                } catch (e: Exception) { mlsChatStatus = "Encryption error: ${e.localizedMessage ?: "unknown"}" }
+                                finally { mlsBusy = false }
+                            }) { Text("Encrypt message") }
+                            OutlinedTextField(value = mlsCiphertextText, onValueChange = { mlsCiphertextText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Encrypted ciphertext to share") }, minLines = 2)
+                            OutlinedTextField(value = mlsIncomingCiphertextText, onValueChange = { mlsIncomingCiphertextText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Paste received ciphertext") }, minLines = 2)
+                            Button(enabled = !mlsBusy && groupRecordId != null && mlsIncomingCiphertextText.isNotBlank() && runCatching { mlsRepository.restoreAndValidateGroupState(groupRecordId) }.getOrDefault(false), onClick = {
+                                mlsBusy = true
+                                try {
+                                    val encrypted = Base64.decode(mlsIncomingCiphertextText.trim(), Base64.DEFAULT)
+                                    val plaintext = mlsRepository.decryptAndAdvanceGroupState(groupRecordId!!, encrypted)
+                                    try {
+                                        val encoded = Base64.encodeToString(plaintext, Base64.NO_WRAP)
                                         val entry = "$chatId#${System.currentTimeMillis()}#$encoded"
                                         val updated = localMessages + entry
-                                        val encryptedRecords = updated.map { encryptLocalRecord(it) }.toSet()
-                                        prefs.edit().putStringSet("local_messages", encryptedRecords).apply()
+                                        check(prefs.edit().putStringSet("local_messages", updated.map { encryptLocalRecord(it) }.toSet()).commit())
                                         localMessages = updated
-                                        messageDraft = ""
-                                    }
-                                }, enabled = messageDraft.isNotBlank()) { Text("Save on this phone") }
-                                TextButton(onClick = { selectedChat = null }) { Text("Close") }
+                                        mlsIncomingCiphertextText = ""
+                                        mlsChatStatus = "Authenticated message decrypted and saved."
+                                    } finally { encrypted.fill(0); plaintext.fill(0) }
+                                } catch (e: Exception) { mlsChatStatus = "Decryption error: ${e.localizedMessage ?: "unknown"}" }
+                                finally { mlsBusy = false }
+                            }) { Text("Decrypt received message") }
+                            Text("Decrypted chat history", style = MaterialTheme.typography.titleSmall)
+                            val chatEntries = localMessages.mapNotNull { entry ->
+                                val parts = entry.split("#", limit = 3)
+                                if (parts.size == 3 && parts[0] == chatId) try { parts[1].toLong() to String(Base64.decode(parts[2], Base64.DEFAULT), Charsets.UTF_8) } catch (_: Exception) { null } else null
+                            }.sortedBy { it.first }
+                            chatEntries.forEach { (_, body) ->
+                                Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                                    Text(body, Modifier.padding(10.dp))
+                                }
                             }
+                            TextButton(onClick = { selectedChat = null }) { Text("Close") }
                         }
                     }
                 }
