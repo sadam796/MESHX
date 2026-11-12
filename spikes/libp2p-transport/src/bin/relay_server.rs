@@ -73,3 +73,56 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
     Ok(())
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn test_key_path(label: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "meshx-relay-key-{label}-{}-{nonce}.key",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn relay_identity_is_stable_across_restarts() {
+        let path = test_key_path("restart");
+        let first = load_or_create_identity(&path).expect("create relay identity");
+        let first_peer = first.public().to_peer_id();
+        drop(first);
+
+        let second = load_or_create_identity(&path).expect("reload relay identity");
+        assert_eq!(second.public().to_peer_id(), first_peer);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn relay_identity_file_is_created_with_private_permissions() {
+        let path = test_key_path("permissions");
+        let _key = load_or_create_identity(&path).expect("create relay identity");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).expect("metadata").permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn corrupted_relay_identity_is_not_silently_replaced() {
+        let path = test_key_path("corrupt");
+        std::fs::write(&path, b"not-a-libp2p-key").expect("write corrupt key");
+        assert!(load_or_create_identity(&path).is_err());
+        let _ = std::fs::remove_file(path);
+    }
+}
