@@ -65,7 +65,6 @@ async fn sender_stores_recipient_fetches_and_acknowledges_over_network() {
     .expect("mailbox server listen timeout");
 
     sender.dial(server_address.clone()).expect("sender dials mailbox server");
-    recipient.dial(server_address.clone()).expect("recipient dials mailbox server");
 
     let envelope = DeliveryEnvelope {
         message_id: [77; 16],
@@ -79,6 +78,7 @@ async fn sender_stores_recipient_fetches_and_acknowledges_over_network() {
 
     let mut store_sent = false;
     let mut stored = false;
+    let mut recipient_dialed = false;
     let mut recipient_connected = false;
     let mut fetch_sent = false;
     let mut ack_sent = false;
@@ -162,6 +162,11 @@ async fn sender_stores_recipient_fetches_and_acknowledges_over_network() {
                 }
             }
 
+            if stored && !recipient_dialed {
+                recipient.dial(server_address.clone()).expect("offline recipient reconnects to mailbox server");
+                recipient_dialed = true;
+            }
+
             if stored && recipient_connected && !fetch_sent {
                 recipient.behaviour_mut().send_request(&server_peer, MailboxRequest::Fetch);
                 fetch_sent = true;
@@ -173,6 +178,7 @@ async fn sender_stores_recipient_fetches_and_acknowledges_over_network() {
 
     assert!(store_sent);
     assert!(stored);
+    assert!(recipient_dialed);
     assert!(fetch_sent);
     assert!(ack_sent);
     assert!(queue.is_empty().expect("mailbox queue state"));
