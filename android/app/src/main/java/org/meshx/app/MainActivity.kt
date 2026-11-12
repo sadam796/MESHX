@@ -324,6 +324,7 @@ private fun MeshxHome() {
     val prefs = remember { context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE) }
     var nativeTransportStatus by remember { mutableStateOf("Preparing secure MESHX identity…") }
     var nativeTransportReady by remember { mutableStateOf(false) }
+    var relayAddress by remember { mutableStateOf(prefs.getString("relay_address", "") ?: "") }
     var bootstrapAddresses by remember {
         mutableStateOf(prefs.getString("bootstrap_peers", "") ?: "")
     }
@@ -773,6 +774,26 @@ private fun MeshxHome() {
                 }
 
                 Spacer(Modifier.height(24.dp))
+                Text("Circuit relay connection", style = MaterialTheme.typography.titleMedium)
+                Text("Optional: enter a live MESHX circuit-relay v2 server multiaddress. The relay forwards encrypted traffic; it cannot read MLS ciphertext.")
+                OutlinedTextField(
+                    value = relayAddress,
+                    onValueChange = { relayAddress = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Relay server multiaddress") },
+                    placeholder = { Text("/ip4/host/tcp/4001/p2p/RELAY_PEER_ID") },
+                    minLines = 1
+                )
+                Button(
+                    onClick = {
+                        prefs.edit().putString("relay_address", relayAddress.trim()).apply()
+                        status = NativeMeshx.addRelayPeer(relayAddress)
+                        error = if (status?.contains("error:", ignoreCase = true) == true || status?.contains("rejected", ignoreCase = true) == true) status else null
+                    },
+                    enabled = nativeTransportReady && relayAddress.isNotBlank()
+                ) { Text("Connect to relay server") }
+                Text("Reservation tabhi confirm hogi jab native relay event success report kare. Sirf address save karna live connection ka saboot nahi hai.")
+
                 Text("Internet peer discovery", style = MaterialTheme.typography.titleMedium)
                 Text("Optional: add bootstrap node multiaddresses, one per line. These are network entry points, not contacts. You must use a live MESHX-compatible node operated by you or a trusted independent operator.")
                 OutlinedTextField(
