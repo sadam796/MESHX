@@ -96,8 +96,10 @@ async fn two_clients_can_connect_through_a_local_circuit_relay() {
     let client_a_key = identity::Keypair::generate_ed25519();
     let client_a_peer = client_a_key.public().to_peer_id();
     let mut client_a = relay_client(client_a_key);
-    client_a.dial(server_address.clone()).expect("client A dial relay");
 
+    // Listening on the relay circuit address makes the relay-client behaviour
+    // dial the relay and request a reservation. Do not race it with a separate
+    // manual dial to the same peer.
     let reservation_listener = server_address.clone().with(Protocol::P2pCircuit);
     client_a
         .listen_on(reservation_listener)
