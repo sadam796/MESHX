@@ -358,7 +358,7 @@ pub fn add_member_to_group_snapshot(
     key_package_bytes: &[u8],
 ) -> Result<Vec<u8>, String> {
     use openmls::prelude::{DeserializeBytes, KeyPackageIn, ProtocolVersion};
-    use tls_codec::Serialize;
+    use openmls::prelude::tls_codec::Serialize;
 
     if group_snapshot_bytes.is_empty() || key_package_bytes.is_empty() {
         return Err("MLS group snapshot and recipient KeyPackage are required".to_owned());
