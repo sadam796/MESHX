@@ -580,7 +580,7 @@ pub enum MailboxRejectReason {
 pub enum MailboxResponse {
     Stored { accepted: bool, duplicate: bool },
     Messages { envelopes: Vec<DeliveryEnvelope> },
-    Acknowledged { removed: bool },
+    Acknowledged { message_id: [u8; 16], removed: bool },
     Rejected { reason: MailboxRejectReason },
 }
 
@@ -643,7 +643,7 @@ pub fn handle_mailbox_request(
         },
         MailboxRequest::Acknowledge { message_id } => {
             match queue.acknowledge_for(message_id, &peer_bytes, now) {
-                Ok(removed) => MailboxResponse::Acknowledged { removed },
+                Ok(removed) => MailboxResponse::Acknowledged { message_id, removed },
                 Err(_) => MailboxResponse::Rejected {
                     reason: MailboxRejectReason::StorageUnavailable,
                 },
@@ -900,7 +900,7 @@ mod tests {
         );
         assert_eq!(
             handle_mailbox_request(&queue, &attacker, MailboxRequest::Acknowledge { message_id: item.message_id }, 104),
-            MailboxResponse::Acknowledged { removed: false }
+            MailboxResponse::Acknowledged { message_id: item.message_id, removed: false }
         );
         assert_eq!(queue.len().unwrap(), 1, "a different peer cannot delete the recipient's message");
 
@@ -911,7 +911,7 @@ mod tests {
         assert_eq!(queue.len().unwrap(), 1, "fetch does not delete before durable recipient ack");
         assert_eq!(
             handle_mailbox_request(&queue, &recipient, MailboxRequest::Acknowledge { message_id: item.message_id }, 106),
-            MailboxResponse::Acknowledged { removed: true }
+            MailboxResponse::Acknowledged { message_id: item.message_id, removed: true }
         );
         assert!(queue.is_empty().unwrap());
         let _ = std::fs::remove_dir_all(directory);
