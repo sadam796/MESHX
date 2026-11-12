@@ -41,6 +41,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let listen_address = std::env::var("MESHX_RELAY_LISTEN")
         .unwrap_or_else(|_| "/ip4/0.0.0.0/tcp/4001".to_string())
         .parse()?;
+    let public_address = std::env::var("MESHX_RELAY_PUBLIC_ADDRESS")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| value.parse())
+        .transpose()?;
 
     let identity = load_or_create_identity(&key_path)?;
     let peer_id = identity.public().to_peer_id();
@@ -61,6 +66,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .build();
 
     swarm.listen_on(listen_address)?;
+    if let Some(address) = public_address {
+        swarm.add_external_address(address.clone());
+        println!("Advertised relay address: {address}/p2p/{peer_id}");
+    } else {
+        println!("No MESHX_RELAY_PUBLIC_ADDRESS set; clients must use the VPS address entered in the app.");
+    }
     println!("MESHX relay peer ID: {peer_id}");
     println!("Relay identity file: {}", key_path.display());
 
