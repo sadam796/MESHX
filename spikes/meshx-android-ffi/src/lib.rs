@@ -405,7 +405,7 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
                                 }
                                 Some(TransportCommand::FindPeer(peer_id)) => {
                                     let query_id = meshx_libp2p_transport_spike::find_closest_peers(
-                                        &mut swarm.behaviour_mut().kad,
+                                        &mut swarm.behaviour_mut().meshx.kad,
                                         peer_id.clone(),
                                     );
                                     set_status(format!(
