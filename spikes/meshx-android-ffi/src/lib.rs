@@ -875,9 +875,16 @@ pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativePollIncomingCipherte
     let expected_sender = peer_id.to_bytes();
     // Peek rather than drain: Android explicitly acknowledges each message
     // only after MLS authentication and encrypted local persistence succeed.
+    let pending_acks = match mailbox_ack_pending().lock() {
+        Ok(pending) => pending.clone(),
+        Err(_) => return jni_string(&mut env, "[]".to_owned()),
+    };
     let messages = match incoming_messages().lock() {
         Ok(queue) => queue.iter()
-            .filter(|message| message.sender_id.as_slice() == expected_sender.as_slice())
+            .filter(|message| {
+                message.sender_id.as_slice() == expected_sender.as_slice()
+                    && !pending_acks.contains(&message.message_id)
+            })
             .cloned()
             .collect::<Vec<_>>(),
         Err(_) => return jni_string(&mut env, "[]".to_owned()),
@@ -919,13 +926,45 @@ pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeAckIncomingCiphertex
             Err(_) => return JNI_FALSE,
         }
     }
-    match incoming_messages().lock() {
-        Ok(mut queue) => {
-            let before = queue.len();
-            queue.retain(|message| message.message_id != message_id);
-            if queue.len() < before { JNI_TRUE } else { JNI_FALSE }
+    let relay_peer = match mailbox_sources().lock() {
+        Ok(sources) => sources.get(&message_id).copied(),
+        Err(_) => return JNI_FALSE,
+    };
+    if let Some(relay_peer) = relay_peer {
+        let sender = match command_sender_store().lock() {
+            Ok(stored) => match stored.clone() {
+                Some(sender) => sender,
+                None => return JNI_FALSE,
+            },
+            Err(_) => return JNI_FALSE,
+        };
+        match mailbox_ack_pending().lock() {
+            Ok(mut pending) => {
+                if !pending.insert(message_id) {
+                    return JNI_TRUE;
+                }
+            }
+            Err(_) => return JNI_FALSE,
         }
-        Err(_) => JNI_FALSE,
+        if sender.send(TransportCommand::AcknowledgeMailbox { relay_peer, message_id }).is_err() {
+            if let Ok(mut pending) = mailbox_ack_pending().lock() {
+                pending.remove(&message_id);
+            }
+            return JNI_FALSE;
+        }
+        // The server response removes the native copy. If the request fails,
+        // it becomes visible to polling again so the app can retry.
+        JNI_TRUE
+    } else {
+        // Direct peer messages have no relay mailbox copy to acknowledge.
+        match incoming_messages().lock() {
+            Ok(mut queue) => {
+                let before = queue.len();
+                queue.retain(|message| message.message_id != message_id);
+                if queue.len() < before { JNI_TRUE } else { JNI_FALSE }
+            }
+            Err(_) => JNI_FALSE,
+        }
     }
 }
 
