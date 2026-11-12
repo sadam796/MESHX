@@ -447,9 +447,30 @@ pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeSendCiphertext(
 pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativePollIncomingCiphertexts(
     mut env: JNIEnv,
     _this: JObject,
+    raw_peer_id: JString,
 ) -> jstring {
+    let peer_id = match env.get_string(&raw_peer_id) {
+        Ok(value) => match parse_peer_id_input(&value.to_string_lossy()) {
+            Ok(peer_id) => peer_id,
+            Err(_) => return jni_string(&mut env, "[]".to_owned()),
+        },
+        Err(_) => return jni_string(&mut env, "[]".to_owned()),
+    };
+    let expected_sender = peer_id.to_bytes();
     let messages = match incoming_messages().lock() {
-        Ok(mut queue) => queue.drain(..).collect::<Vec<_>>(),
+        Ok(mut queue) => {
+            let mut selected = Vec::new();
+            let mut retained = VecDeque::new();
+            while let Some(message) = queue.pop_front() {
+                if message.sender_id.as_slice() == expected_sender.as_slice() {
+                    selected.push(message);
+                } else {
+                    retained.push_back(message);
+                }
+            }
+            *queue = retained;
+            selected
+        }
         Err(_) => return jni_string(&mut env, "[]".to_owned()),
     };
     // Expose the authenticated libp2p sender ID beside the opaque MLS bytes so
