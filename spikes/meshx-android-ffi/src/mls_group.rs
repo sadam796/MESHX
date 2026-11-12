@@ -341,3 +341,71 @@ mod key_package_tests {
         assert_eq!(public_package, restored_public_package);
     }
 }
+
+
+#[derive(Serialize, Deserialize)]
+pub struct GroupInvitationSnapshot {
+    pub version: u32,
+    pub updated_group_snapshot: Vec<u8>,
+    pub welcome_message: Vec<u8>,
+    pub ratchet_tree: Vec<u8>,
+}
+
+/// Adds a verified remote KeyPackage to an existing MLS group. Returns the
+/// updated sender state plus the Welcome and ratchet tree the recipient needs.
+pub fn add_member_to_group_snapshot(
+    group_snapshot_bytes: &[u8],
+    key_package_bytes: &[u8],
+) -> Result<Vec<u8>, String> {
+    use openmls::prelude::{DeserializeBytes, KeyPackageIn, ProtocolVersion};
+    use tls_codec::Serialize;
+
+    if group_snapshot_bytes.is_empty() || key_package_bytes.is_empty() {
+        return Err("MLS group snapshot and recipient KeyPackage are required".to_owned());
+    }
+    let snapshot: GroupSnapshot = serde_json::from_slice(group_snapshot_bytes)
+        .map_err(|error| format!("MLS group snapshot is invalid: {error}"))?;
+    if snapshot.version != SNAPSHOT_VERSION || snapshot.group_id.is_empty() {
+        return Err("MLS group snapshot version or group ID is invalid".to_owned());
+    }
+    let provider = OpenMlsRustCrypto::default();
+    provider.storage().values.write()
+        .map_err(|_| "OpenMLS provider storage lock is poisoned".to_owned())?
+        .extend(snapshot.entries);
+    let signer = SignatureKeyPair::read(
+        provider.storage(), &snapshot.signer_public, MLS_CIPHERSUITE.signature_algorithm()
+    ).ok_or_else(|| "MLS group signing key is missing".to_owned())?;
+    let group_id = openmls::prelude::GroupId::from_slice(&snapshot.group_id);
+    let mut group = MlsGroup::load(provider.storage(), &group_id)
+        .map_err(|error| format!("MLS group restore failed: {error:?}"))?
+        .ok_or_else(|| "MLS group was not found".to_owned())?;
+    let package_in = KeyPackageIn::tls_deserialize_exact_bytes(key_package_bytes)
+        .map_err(|error| format!("Recipient KeyPackage decoding failed: {error:?}"))?;
+    let package = package_in.validate(provider.crypto(), ProtocolVersion::Mls10)
+        .map_err(|error| format!("Recipient KeyPackage signature validation failed: {error:?}"))?;
+    let (_commit, welcome, _group_info) = group.add_members(
+        &provider, &signer, core::slice::from_ref(&package)
+    ).map_err(|error| format!("MLS member addition failed: {error:?}"))?;
+    group.merge_pending_commit(&provider)
+        .map_err(|error| format!("MLS membership commit failed: {error:?}"))?;
+
+    let welcome_message = welcome.tls_serialize_detached()
+        .map_err(|error| format!("MLS Welcome serialization failed: {error:?}"))?;
+    let ratchet_tree = group.export_ratchet_tree().tls_serialize_detached()
+        .map_err(|error| format!("MLS ratchet tree serialization failed: {error:?}"))?;
+    let entries = provider.storage().values.read()
+        .map_err(|_| "OpenMLS provider storage lock is poisoned".to_owned())?
+        .iter().map(|(key, value)| (key.clone(), value.clone())).collect();
+    let updated_group_snapshot = serde_json::to_vec(&GroupSnapshot {
+        version: SNAPSHOT_VERSION,
+        group_id: group.group_id().as_slice().to_vec(),
+        signer_public: signer.public().to_vec(),
+        entries,
+    }).map_err(|error| format!("Updated MLS group snapshot encoding failed: {error}"))?;
+    serde_json::to_vec(&GroupInvitationSnapshot {
+        version: SNAPSHOT_VERSION,
+        updated_group_snapshot,
+        welcome_message,
+        ratchet_tree,
+    }).map_err(|error| format!("MLS invitation encoding failed: {error}"))
+}
