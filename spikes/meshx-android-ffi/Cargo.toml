@@ -9,7 +9,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 jni = "=0.21.1"
-libp2p = { version = "=0.57.1", default-features = false, features = ["ed25519", "noise", "relay", "tcp", "tokio", "yamux"] }
+libp2p = { version = "=0.57.1", default-features = false, features = ["ed25519", "noise", "quic", "relay", "tcp", "tokio", "yamux"] }
 meshx-libp2p-transport-spike = { path = "../libp2p-transport" }
 futures = "=0.3.31"
 tokio = { version = "1.53", features = ["rt-multi-thread", "time", "net", "sync", "macros"] }
