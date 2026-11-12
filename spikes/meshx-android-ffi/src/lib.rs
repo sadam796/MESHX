@@ -210,6 +210,8 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
                     }
                 };
 
+                let builder = builder.with_quic();
+
                 let builder = match builder
                     .with_relay_client(libp2p::noise::Config::new, yamux::Config::default)
                 {
