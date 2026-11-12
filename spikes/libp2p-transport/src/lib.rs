@@ -188,7 +188,7 @@ pub enum EnvelopeError {
 
 /// Bounded in-memory queue for ciphertext envelopes. It is a testable prototype,
 /// not durable storage; production relays need encrypted-at-rest persistence,
-/// operator quotas, authentication, and abuse controls.
+/// operator monitoring, and stronger abuse controls.
 pub struct MemoryQueue {
     entries: HashMap<[u8; 16], DeliveryEnvelope>,
     max_entries: usize,
