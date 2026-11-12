@@ -1,9 +1,9 @@
 package org.meshx.app
 
 /**
- * JNI boundary for the native libp2p transport.
- * The current native milestone starts a TCP/Noise/Yamux peer only; it does not
- * yet discover contacts or deliver application messages.
+ * JNI boundary for the native libp2p transport and bounded opaque-ciphertext
+ * request/response API. Ciphertext send/receive is not yet connected to the chat
+ * UI or MLS group encryption, and delivery is direct-peer/volatile only.
  */
 internal object NativeMeshx {
     private val loadError: String? = try {
