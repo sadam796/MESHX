@@ -1,5 +1,6 @@
 //! Self-hostable public libp2p circuit-relay v2 node for MESHX.
 //! This is a reachable-peer relay only; it does not implement offline mailbox delivery.
+//! Keep the relay identity volume private and persistent across container restarts.
 use futures::StreamExt;
 use libp2p::{identity, relay, swarm::SwarmEvent, SwarmBuilder};
 use std::{error::Error, path::PathBuf};
