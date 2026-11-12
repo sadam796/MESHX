@@ -31,6 +31,8 @@ internal object NativeMeshx {
     private external fun nativeMlsExtractKeyPackage(snapshot: ByteArray): ByteArray
     private external fun nativeMlsAddMemberToGroup(groupSnapshot: ByteArray, keyPackage: ByteArray): ByteArray
     private external fun nativeMlsJoinGroupFromWelcome(keyPackageState: ByteArray, welcome: ByteArray, ratchetTree: ByteArray): ByteArray
+    private external fun nativeMlsEncryptApplicationMessage(groupSnapshot: ByteArray, plaintext: ByteArray): ByteArray
+    private external fun nativeMlsDecryptApplicationMessage(groupSnapshot: ByteArray, ciphertext: ByteArray): ByteArray
     private external fun nativeMlsValidateGroupSnapshot(snapshot: ByteArray): Boolean
     private external fun nativeMlsTwoMemberRoundTripSelfTest(): Boolean
 
@@ -174,6 +176,30 @@ internal object NativeMeshx {
             }
         } catch (error: UnsatisfiedLinkError) {
             throw IllegalStateException("Native MLS group join unavailable: ${error.message ?: "unknown JNI error"}", error)
+        }
+    }
+
+    /** Encrypts plaintext with the persisted MLS group and returns updated state plus ciphertext. */
+    fun encryptMlsApplicationMessage(groupSnapshot: ByteArray, plaintext: ByteArray): ByteArray {
+        check(loadError == null) { "Native bridge unavailable: $loadError" }
+        return try {
+            nativeMlsEncryptApplicationMessage(groupSnapshot, plaintext).also {
+                check(it.isNotEmpty()) { "Native MLS encryption returned no result." }
+            }
+        } catch (error: UnsatisfiedLinkError) {
+            throw IllegalStateException("Native MLS encryption unavailable: ${error.message ?: "unknown JNI error"}", error)
+        }
+    }
+
+    /** Authenticates and decrypts MLS ciphertext, returning updated state plus plaintext. */
+    fun decryptMlsApplicationMessage(groupSnapshot: ByteArray, ciphertext: ByteArray): ByteArray {
+        check(loadError == null) { "Native bridge unavailable: $loadError" }
+        return try {
+            nativeMlsDecryptApplicationMessage(groupSnapshot, ciphertext).also {
+                check(it.isNotEmpty()) { "Native MLS decryption returned no result." }
+            }
+        } catch (error: UnsatisfiedLinkError) {
+            throw IllegalStateException("Native MLS decryption unavailable: ${error.message ?: "unknown JNI error"}", error)
         }
     }
 
