@@ -18,11 +18,12 @@ The Android prototype currently supports:
 - An isolated SQLite persistence test showing MLS group state can be reopened after simulated process restart on host CI.
 - An isolated libp2p localhost test for two authenticated peers over TCP/Noise/Yamux, subject to CI verification.
 - A bounded in-memory queue and a disk-backed ciphertext mailbox queue prototype with expiry, replay markers, capacity limits, and acknowledgement-before-delete tests.
-- A self-hostable libp2p circuit-relay v2 server binary with persistent relay identity and a Docker Compose deployment recipe (`docs/RELAY_DEPLOYMENT.md`).
+- A self-hostable libp2p circuit-relay v2 server binary with persistent relay identity, explicit HOP protocol enablement, configurable public address advertisement, and a Docker Compose deployment recipe (`docs/RELAY_DEPLOYMENT.md`).
+- Android UI/JNI wiring for an optional circuit-relay client, including a saved relay multiaddress, reservation status reporting, and use of relay routes only after a reservation is confirmed.
 
-The OpenMLS/SQLite spike and libp2p transport/relay server are not integrated into the Android app. The disk-backed mailbox is a local library prototype, not a remotely accessible service. The circuit-relay server forwards live peer traffic and does not store messages for offline recipients.
+The OpenMLS/SQLite spike and disk-backed mailbox remain isolated from the Android app. The relay client and server code are now wired as an experimental path, but a public relay has not been deployed and an Android-to-relay connection has not yet been verified. The circuit-relay server forwards live peer traffic; it does not store messages for offline recipients.
 
-**Not implemented or not yet verified:** identity-change warnings and transport-key rotation confirmation, successful discovery through a reachable public bootstrap node, deployment of a public relay, Android-to-relay integration, real cross-network message delivery, remotely accessible authenticated offline mailbox service, production end-to-end encrypted chats, encrypted media, Bluetooth/Wi-Fi Direct delivery, recovery phrase, encrypted backup, and iPhone app.
+**Not implemented or not yet verified:** identity-change warnings and transport-key rotation confirmation, successful discovery through a reachable public bootstrap node, deployment of a public relay, successful Android-to-public-relay connection, real cross-network message delivery, remotely accessible authenticated offline mailbox service, production end-to-end encrypted chats, encrypted media, Bluetooth/Wi-Fi Direct delivery, recovery phrase, encrypted backup, and iPhone app.
 
 ## Product principles
 
