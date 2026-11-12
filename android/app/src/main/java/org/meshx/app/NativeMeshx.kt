@@ -22,6 +22,7 @@ internal object NativeMeshx {
     private external fun nativeFindPeer(peerId: String): String
     private external fun nativeSendCiphertext(peerId: String, ciphertext: ByteArray): String
     private external fun nativePollIncomingCiphertexts(peerId: String): String
+    private external fun nativeAckIncomingCiphertext(messageId: String): Boolean
     private external fun nativeStartTransport(identity: ByteArray): String
     private external fun nativeAddBootstrapPeers(addresses: String): String
     private external fun nativeMlsCreateSignerSnapshot(): ByteArray
@@ -96,6 +97,13 @@ internal object NativeMeshx {
         nativePollIncomingCiphertexts(peerId)
     } catch (error: UnsatisfiedLinkError) {
         "[]"
+    }
+
+    /** Acknowledge only after the caller has authenticated and saved a message. */
+    fun ackIncomingCiphertext(messageId: String): Boolean = loadError == null && try {
+        nativeAckIncomingCiphertext(messageId)
+    } catch (_: UnsatisfiedLinkError) {
+        false
     }
 
     fun start(identity: ByteArray): String = loadError?.let {
