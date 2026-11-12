@@ -324,3 +324,20 @@ pub fn extract_key_package(snapshot_bytes: &[u8]) -> Result<Vec<u8>, String> {
         .map_err(|error| format!("MLS KeyPackage signature validation failed: {error:?}"))?;
     Ok(snapshot.key_package)
 }
+
+#[cfg(test)]
+mod key_package_tests {
+    use super::*;
+
+    #[test]
+    fn creates_persists_and_revalidates_one_use_contact_key_package() {
+        let snapshot = create_key_package_snapshot(b"meshx-contact-test")
+            .expect("create contact KeyPackage snapshot");
+        let public_package = extract_key_package(&snapshot)
+            .expect("restore and validate public KeyPackage");
+        assert!(!public_package.is_empty());
+        let restored_public_package = extract_key_package(&snapshot)
+            .expect("repeat validation from same saved private state");
+        assert_eq!(public_package, restored_public_package);
+    }
+}
