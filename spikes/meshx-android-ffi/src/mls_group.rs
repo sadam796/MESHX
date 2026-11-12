@@ -570,6 +570,13 @@ pub fn encrypt_group_application_message(
     }).map_err(|error| format!("MLS encrypted application bundle encoding failed: {error}"))
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct DecryptedApplicationSnapshot {
+    pub version: u32,
+    pub updated_group_snapshot: Vec<u8>,
+    pub plaintext: Vec<u8>,
+}
+
 /// Authenticates and decrypts an MLS application message, returning the advanced
 /// receiver ratchet state and plaintext only after OpenMLS verifies the message.
 pub fn decrypt_group_application_message(
@@ -614,7 +621,7 @@ pub fn decrypt_group_application_message(
         signer_public: snapshot.signer_public,
         entries,
     }).map_err(|error| format!("Updated receiver MLS state encoding failed: {error}"))?;
-    serde_json::to_vec(&EncryptedApplicationSnapshot {
-        version: SNAPSHOT_VERSION, updated_group_snapshot, ciphertext: plaintext,
+    serde_json::to_vec(&DecryptedApplicationSnapshot {
+        version: SNAPSHOT_VERSION, updated_group_snapshot, plaintext,
     }).map_err(|error| format!("MLS decrypted application bundle encoding failed: {error}"))
 }
