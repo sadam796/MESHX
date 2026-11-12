@@ -515,6 +515,7 @@ private fun MeshxHome() {
                 Spacer(Modifier.height(24.dp))
                 Text("MESHX", style = MaterialTheme.typography.headlineLarge)
                 Text("Global private messaging")
+                NearbyBluetoothPanel()
                 Text("Android prototype — Internet delivery and end-to-end chat are still in development.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 Spacer(Modifier.height(24.dp))
                 Text("Your digital identity", style = MaterialTheme.typography.titleLarge)
