@@ -135,7 +135,7 @@ internal class MlsStateRepository(context: Context) {
             result = NativeMeshx.decryptMlsApplicationMessage(state, ciphertext)
             val bundle = JSONObject(result.toString(Charsets.UTF_8))
             val updatedState = bundle.getJSONArray("updated_group_snapshot").toByteArrayValue()
-            val plaintext = bundle.getJSONArray("ciphertext").toByteArrayValue()
+            val plaintext = bundle.getJSONArray("plaintext").toByteArrayValue()
             try {
                 check(NativeMeshx.validateMlsGroupSnapshot(updatedState)) {
                     "Advanced receiver MLS state failed validation."
