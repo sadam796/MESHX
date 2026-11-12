@@ -138,7 +138,8 @@ async fn sender_stores_recipient_fetches_and_acknowledges_over_network() {
                                     );
                                     ack_sent = true;
                                 }
-                                MailboxResponse::Acknowledged { removed } => {
+                                MailboxResponse::Acknowledged { message_id, removed } => {
+                                    assert_eq!(message_id, envelope.message_id);
                                     assert!(removed, "recipient ack must remove its queued message");
                                     acknowledged = true;
                                 }
