@@ -1,6 +1,6 @@
-//! Android JNI bridge that starts a real libp2p TCP/Noise/Yamux swarm.
-//! This milestone starts a listening peer; it does not yet implement recipient
-//! discovery, MLS sessions, message sending, relays, or global delivery.
+//! Android JNI bridge for a libp2p TCP/Noise/Yamux peer and opaque ciphertext
+//! request/response delivery. MLS encryption, durable relays, and global delivery
+//! are separate unfinished milestones.
 
 use std::{
     collections::VecDeque,
