@@ -9,6 +9,9 @@ services:
       MESHX_RELAY_KEY_FILE: /data/relay-identity.key
       MESHX_RELAY_LISTEN: /ip4/0.0.0.0/tcp/4001
       MESHX_RELAY_PUBLIC_ADDRESS: ${MESHX_RELAY_PUBLIC_ADDRESS:-}
+      MESHX_MAILBOX_DIR: /data/mailbox
+      MESHX_MAILBOX_MAX_ENTRIES: ${MESHX_MAILBOX_MAX_ENTRIES:-1000}
+      MESHX_MAILBOX_MAX_BYTES: ${MESHX_MAILBOX_MAX_BYTES:-536870912}
     ports:
       - "4001:4001/tcp"
     volumes:
