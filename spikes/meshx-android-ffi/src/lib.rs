@@ -57,6 +57,7 @@ enum TransportCommand {
     AcknowledgeMailbox { relay_peer: libp2p::PeerId, message_id: [u8; 16] },
 }
 
+#[derive(Clone, Copy)]
 enum PendingMailboxRequest {
     Fetch,
     Store,
@@ -540,19 +541,31 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
                                                         ));
                                                     }
                                                     meshx_libp2p_transport_spike::MailboxResponse::Acknowledged { message_id, removed } => {
-                                                        if let Ok(mut pending) = mailbox_ack_pending().lock() {
-                                                            pending.remove(&message_id);
+                                                        let is_expected_ack = matches!(
+                                                            pending,
+                                                            Some(PendingMailboxRequest::Acknowledge(expected_id))
+                                                                if expected_id == message_id
+                                                        );
+                                                        if is_expected_ack {
+                                                            if let Ok(mut queued) = mailbox_ack_pending().lock() {
+                                                                queued.remove(&message_id);
+                                                            }
+                                                            if let Ok(mut queue) = incoming_messages().lock() {
+                                                                queue.retain(|item| item.message_id != message_id);
+                                                            }
+                                                            if let Ok(mut sources) = mailbox_sources().lock() {
+                                                                sources.remove(&message_id);
+                                                            }
+                                                            set_status(format!(
+                                                                "MESHX relay mailbox acknowledgement for {}: server_removed={removed}.",
+                                                                message_id.iter().map(|byte| format!("{byte:02x}")).collect::<String>()
+                                                            ));
+                                                        } else {
+                                                            set_status(format!(
+                                                                "MESHX relay returned an unexpected acknowledgement for {}.",
+                                                                message_id.iter().map(|byte| format!("{byte:02x}")).collect::<String>()
+                                                            ));
                                                         }
-                                                        if let Ok(mut queue) = incoming_messages().lock() {
-                                                            queue.retain(|item| item.message_id != message_id);
-                                                        }
-                                                        if let Ok(mut sources) = mailbox_sources().lock() {
-                                                            sources.remove(&message_id);
-                                                        }
-                                                        set_status(format!(
-                                                            "MESHX relay mailbox acknowledgement for {}: server_removed={removed}.",
-                                                            message_id.iter().map(|byte| format!("{byte:02x}")).collect::<String>()
-                                                        ));
                                                     }
                                                     meshx_libp2p_transport_spike::MailboxResponse::Rejected { reason } => {
                                                         mailbox_fetch_in_flight.remove(&peer);
