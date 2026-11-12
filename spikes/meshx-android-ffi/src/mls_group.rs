@@ -625,3 +625,45 @@ pub fn decrypt_group_application_message(
         version: SNAPSHOT_VERSION, updated_group_snapshot, plaintext,
     }).map_err(|error| format!("MLS decrypted application bundle encoding failed: {error}"))
 }
+
+
+#[cfg(test)]
+mod end_to_end_message_tests {
+    use super::*;
+
+    #[test]
+    fn joined_contacts_exchange_authenticated_mls_application_message() {
+        let sender_group = create_group_snapshot(b"meshx-e2e-sender")
+            .expect("create sender group");
+        let recipient_key_state = create_key_package_snapshot(b"meshx-e2e-recipient")
+            .expect("create recipient KeyPackage");
+        let recipient_public_key = extract_key_package(&recipient_key_state)
+            .expect("extract recipient public KeyPackage");
+        let invitation_bytes = add_member_to_group_snapshot(&sender_group, &recipient_public_key)
+            .expect("add recipient to sender group");
+        let invitation: GroupInvitationSnapshot = serde_json::from_slice(&invitation_bytes)
+            .expect("decode invitation");
+        let recipient_group = join_group_from_invitation(
+            &recipient_key_state, &invitation.welcome_message, &invitation.ratchet_tree
+        ).expect("recipient joins sender group");
+
+        let plaintext = b"hello from one MESHX contact to another";
+        let encrypted_bundle = encrypt_group_application_message(
+            &invitation.updated_group_snapshot, plaintext
+        ).expect("encrypt application message");
+        let encrypted: EncryptedApplicationSnapshot = serde_json::from_slice(&encrypted_bundle)
+            .expect("decode encrypted bundle");
+        assert!(!encrypted.ciphertext.is_empty());
+
+        let decrypted_bundle = decrypt_group_application_message(
+            &recipient_group, &encrypted.ciphertext
+        ).expect("authenticate and decrypt application message");
+        let decrypted: DecryptedApplicationSnapshot = serde_json::from_slice(&decrypted_bundle)
+            .expect("decode decrypted bundle");
+        assert_eq!(decrypted.plaintext, plaintext);
+        validate_group_snapshot(&encrypted.updated_group_snapshot)
+            .expect("sender ratchet remains restorable");
+        validate_group_snapshot(&decrypted.updated_group_snapshot)
+            .expect("recipient ratchet remains restorable");
+    }
+}
