@@ -30,7 +30,8 @@ libp2p = { version = "=0.57.1", default-features = false, features = [
 
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.145"
+futures = "=0.3.31"
+tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "signal", "time"] }
 
 [dev-dependencies]
-futures = "=0.3.31"
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "time"] }
