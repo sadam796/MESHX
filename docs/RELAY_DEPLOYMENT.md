@@ -9,7 +9,9 @@ This repository now contains a self-hostable libp2p circuit-relay v2 server bina
 - A persistent Ed25519 relay identity file, so the relay Peer ID remains stable across restarts.
 - A non-root container process and a persistent Docker volume for the relay identity.
 
-This is a reachable-peer relay, not an offline message mailbox. A recipient must still be reachable through the relay for circuit-relay forwarding. The separate disk-backed ciphertext mailbox prototype is not exposed as a network service and is not integrated with Android.
+The server now exposes an experimental durable mailbox protocol at /meshx/mailbox/1 in addition to circuit-relay v2. An authenticated sender can store an already-encrypted envelope; the recipient can fetch envelopes addressed to its authenticated Peer ID and acknowledge each only after durable local save. Fetch does not delete messages. The disk-backed queue survives server restarts and retains replay markers until message expiry.
+
+The mailbox protocol is not yet integrated into the Android app, and a full Android-to-server mailbox exchange has not yet been verified. Do not describe offline delivery as working in the app yet.
 
 ## Deploy on a Linux VPS
 
@@ -31,12 +33,16 @@ The Compose volume `meshx-relay-data` preserves the private relay identity. Back
 - `MESHX_RELAY_LISTEN`: libp2p multiaddress to listen on. Default `/ip4/0.0.0.0/tcp/4001`.
 - `MESHX_RELAY_KEY_FILE`: private identity file path. Default `./data/relay-identity.key`.
 - `MESHX_RELAY_PUBLIC_ADDRESS`: optional public-facing multiaddress without the terminal `/p2p/<PEER_ID>`, for example `/ip4/<PUBLIC_IP>/tcp/4001`. Set this in the VPS environment so the relay can advertise the address in reservation vouchers. If omitted, users must enter the VPS address directly in the app.
+- `MESHX_MAILBOX_DIR`: durable mailbox directory. Default `./data/mailbox`.
+- `MESHX_MAILBOX_MAX_ENTRIES`: global pending-message limit. Default `1000`.
+- `MESHX_MAILBOX_MAX_BYTES`: global pending-ciphertext limit. Default `536870912` (512 MiB).
 
 ## Release and security limitations
 
 - This server has not been deployed to a public host from this repository.
 - The Android app does not yet connect to this relay; no real-world cross-network message delivery is claimed.
 - Circuit relay v2 forwards live peer traffic; it does not store messages for offline recipients.
-- The experimental durable mailbox queue is a local library abstraction, not a remotely authenticated mailbox API.
-- No production quotas, monitoring, DDoS protection, abuse reporting, operator authentication, or service-level guarantees are provided.
+- Mailbox requests are authenticated against the libp2p Peer ID established by the Noise connection: store requires sender_id to match the connected peer; fetch is scoped to that peer; acknowledgement can delete only a message addressed to that peer.
+- The mailbox stores encrypted message envelopes, but routing metadata is visible to the relay and is not encrypted at rest. The mailbox directory is created with mode 0700 and files with mode 0600 on Unix-like hosts.
+- The mailbox currently has global capacity limits only. Per-peer quotas, rate limits, monitoring, DDoS protection, abuse reporting, operator controls, and service-level guarantees are not provided.
 - Run only as an experimental test node until those controls and end-to-end Android integration are completed.
