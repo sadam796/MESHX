@@ -69,6 +69,24 @@ class NativeMeshxInstrumentedTest {
     }
 
     @Test
+    fun nativeCiphertextBridgeRejectsMalformedPeerAndEmptyPayload() {
+        val malformedPeer = NativeMeshx.sendCiphertext("not-a-peer-id", byteArrayOf(1))
+        assertTrue(
+            "Expected malformed destination to be rejected by native JNI, got: $malformedPeer",
+            malformedPeer.startsWith("MESHX send error: Invalid MESHX transport Peer ID.")
+        )
+
+        val identity = NativeMeshx.generateIdentity()
+        val publicKey = NativeMeshx.transportPublicKey(identity)
+        val validPeer = NativeMeshx.transportPeerId(publicKey)
+        val emptyPayload = NativeMeshx.sendCiphertext(validPeer, byteArrayOf())
+        assertTrue(
+            "Expected empty ciphertext to be rejected before queueing, got: $emptyPayload",
+            emptyPayload.startsWith("MESHX send error: Encrypted payload must be between 1 byte and 1 MiB.")
+        )
+    }
+
+    @Test
     fun nativeDhtLookupRejectsMalformedPeerId() {
         val result = NativeMeshx.findPeer("not-a-peer-id")
         assertTrue(
