@@ -304,7 +304,7 @@ pub fn create_key_package_snapshot(identity: &[u8]) -> Result<Vec<u8>, String> {
 
 /// Extracts the public one-use KeyPackage from an authenticated vault snapshot.
 pub fn extract_key_package(snapshot_bytes: &[u8]) -> Result<Vec<u8>, String> {
-    use openmls::prelude::{KeyPackageIn, ProtocolVersion, tls_codec::Deserialize};
+    use openmls::prelude::{DeserializeBytes, KeyPackageIn, ProtocolVersion};
 
     let snapshot: KeyPackageSnapshot = serde_json::from_slice(snapshot_bytes)
         .map_err(|error| format!("MLS KeyPackage snapshot is invalid: {error}"))?;
