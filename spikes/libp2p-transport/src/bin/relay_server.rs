@@ -51,7 +51,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
             libp2p::noise::Config::new,
             libp2p::yamux::Config::default,
         )?
-        .with_behaviour(|_| relay::Behaviour::new(peer_id, relay::Config::default()))?
+        .with_behaviour(|_| {
+            let mut behaviour = relay::Behaviour::new(peer_id, relay::Config::default());
+            // This VPS is intentionally operated as a relay. Do not wait for
+            // external-address discovery before advertising the HOP protocol.
+            behaviour.set_status(Some(relay::Status::Enable));
+            behaviour
+        })?
         .build();
 
     swarm.listen_on(listen_address)?;
