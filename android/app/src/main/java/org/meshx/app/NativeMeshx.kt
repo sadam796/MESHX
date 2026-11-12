@@ -20,6 +20,8 @@ internal object NativeMeshx {
     private external fun nativeTransportPublicKey(identity: ByteArray): ByteArray
     private external fun nativeTransportPeerId(publicKey: ByteArray): String
     private external fun nativeFindPeer(peerId: String): String
+    private external fun nativeSendCiphertext(peerId: String, ciphertext: ByteArray): String
+    private external fun nativePollIncomingCiphertexts(): String
     private external fun nativeStartTransport(identity: ByteArray): String
     private external fun nativeAddBootstrapPeers(addresses: String): String
     private external fun nativeMlsCreateSignerSnapshot(): ByteArray
@@ -67,6 +69,27 @@ internal object NativeMeshx {
         nativeFindPeer(peerId)
     } catch (error: UnsatisfiedLinkError) {
         "MESHX peer discovery error: Native method unavailable: ${error.message ?: "unknown JNI error"}"
+    }
+
+    /**
+     * Sends opaque MLS/application ciphertext to a directly reachable libp2p peer.
+     * This does not encrypt plaintext, discover a route, or provide offline delivery.
+     */
+    fun sendCiphertext(peerId: String, ciphertext: ByteArray): String = loadError?.let {
+        "MESHX send error: Native bridge unavailable: $it"
+    } ?: try {
+        nativeSendCiphertext(peerId, ciphertext)
+    } catch (error: UnsatisfiedLinkError) {
+        "MESHX send error: Native method unavailable: ${error.message ?: "unknown JNI error"}"
+    }
+
+    /** Returns and clears ciphertext envelopes waiting in the bounded volatile receive queue. */
+    fun pollIncomingCiphertexts(): String = loadError?.let {
+        "[]"
+    } ?: try {
+        nativePollIncomingCiphertexts()
+    } catch (error: UnsatisfiedLinkError) {
+        "[]"
     }
 
     fun start(identity: ByteArray): String = loadError?.let {
