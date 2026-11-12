@@ -67,7 +67,7 @@ fn queue_ciphertext(raw_peer_id: &str, ciphertext: Vec<u8>) -> Result<String, St
         .ok_or_else(|| "Start the MESHX network before sending a message.".to_owned())?;
     sender.send(TransportCommand::SendCiphertext { peer_id, ciphertext })
         .map_err(|_| "MESHX network thread is not accepting commands.".to_owned())?;
-    Ok("MESHX encrypted payload queued for direct peer delivery. This is not a delivered/read receipt.".to_owned())
+    Ok("MESHX encrypted payload queued for direct or confirmed circuit-relay peer delivery. This is not a delivered/read receipt.".to_owned())
 }
 
 static STARTED: AtomicBool = AtomicBool::new(false);
@@ -395,6 +395,10 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
                                 Some(TransportCommand::AddRelayPeer(raw_address)) => {
                                     match parse_relay_address(&raw_address) {
                                         Ok(relay_address) => {
+                                            if requested_relays.contains(&relay_address) {
+                                                set_status(format!("MESHX relay {} is already configured; waiting for or using its existing reservation.", relay_address));
+                                                continue;
+                                            }
                                             let relay_peer = match relay_address.iter().last() {
                                                 Some(Protocol::P2p(peer)) => peer,
                                                 _ => {
@@ -404,7 +408,12 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
                                             };
                                             let mut reservation_address = relay_address.clone();
                                             reservation_address.push(Protocol::P2pCircuit);
-                                            match swarm.dial(relay_address.clone()) {
+                                            let dial_result = if swarm.is_connected(&relay_peer) {
+                                                Ok(())
+                                            } else {
+                                                swarm.dial(relay_address.clone())
+                                            };
+                                            match dial_result {
                                                 Ok(()) => {
                                                     match swarm.listen_on(reservation_address) {
                                                         Ok(listener_id) => {
