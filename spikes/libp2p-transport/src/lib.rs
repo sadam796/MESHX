@@ -981,6 +981,37 @@ mod tests {
     }
 
     #[test]
+    fn disk_queue_enforces_per_sender_entry_and_byte_quotas() {
+        let directory = disk_queue_test_dir("sender-quota");
+        let queue = DiskQueue::open(&directory, 10, 1024).unwrap();
+        let mut first = envelope(71, b"bob", 500);
+        first.sender_id = b"alice".to_vec();
+        first.ciphertext = vec![1; 8];
+        assert!(queue.enqueue_with_sender_limits(first, 101, 1, 10).unwrap());
+
+        let mut over_count = envelope(72, b"carol", 500);
+        over_count.sender_id = b"alice".to_vec();
+        assert!(matches!(
+            queue.enqueue_with_sender_limits(over_count, 102, 1, 10),
+            Err(DiskQueueError::SenderQuotaExceeded)
+        ));
+
+        let mut other_sender = envelope(73, b"carol", 500);
+        other_sender.sender_id = b"bob-sender".to_vec();
+        other_sender.ciphertext = vec![2; 10];
+        assert!(queue.enqueue_with_sender_limits(other_sender, 102, 1, 10).unwrap());
+
+        let mut over_bytes = envelope(74, b"carol", 500);
+        over_bytes.sender_id = b"third-sender".to_vec();
+        over_bytes.ciphertext = vec![3; 11];
+        assert!(matches!(
+            queue.enqueue_with_sender_limits(over_bytes, 103, 1, 10),
+            Err(DiskQueueError::SenderQuotaExceeded)
+        ));
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
     fn disk_queue_enforces_capacity_and_expires_messages() {
         let directory = disk_queue_test_dir("limits");
         let queue = DiskQueue::open(&directory, 1, 20).unwrap();
