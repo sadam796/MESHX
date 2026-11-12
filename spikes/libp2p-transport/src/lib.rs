@@ -312,6 +312,203 @@ pub fn new_network_behaviour(local_peer_id: libp2p::PeerId) -> MeshxNetworkBehav
     }
 }
 
+
+
+/// Durable relay mailbox. It stores only the already-encrypted application
+/// ciphertext and bounded routing metadata. This is disk persistence, not
+/// encryption-at-rest; production deployment must protect the volume and
+/// authenticate/authorize every mailbox operation.
+pub struct DiskQueue {
+    directory: std::path::PathBuf,
+    max_entries: usize,
+    max_bytes: usize,
+    max_seen: usize,
+}
+
+#[derive(Debug)]
+pub enum DiskQueueError {
+    Envelope(EnvelopeError),
+    Io(std::io::Error),
+    Serialization(serde_json::Error),
+}
+
+impl From<EnvelopeError> for DiskQueueError {
+    fn from(value: EnvelopeError) -> Self { Self::Envelope(value) }
+}
+impl From<std::io::Error> for DiskQueueError {
+    fn from(value: std::io::Error) -> Self { Self::Io(value) }
+}
+impl From<serde_json::Error> for DiskQueueError {
+    fn from(value: serde_json::Error) -> Self { Self::Serialization(value) }
+}
+
+impl DiskQueue {
+    pub fn open(
+        directory: impl Into<std::path::PathBuf>,
+        max_entries: usize,
+        max_bytes: usize,
+    ) -> Result<Self, DiskQueueError> {
+        let directory = directory.into();
+        std::fs::create_dir_all(&directory)?;
+        Ok(Self {
+            directory,
+            max_entries,
+            max_bytes,
+            max_seen: max_entries.saturating_mul(4).max(max_entries),
+        })
+    }
+
+    fn id_hex(id: &[u8; 16]) -> String {
+        id.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    fn message_path(&self, id: &[u8; 16]) -> std::path::PathBuf {
+        self.directory.join(format!("{}.msg", Self::id_hex(id)))
+    }
+
+    fn seen_path(&self, id: &[u8; 16]) -> std::path::PathBuf {
+        self.directory.join(format!("{}.seen", Self::id_hex(id)))
+    }
+
+    fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> Result<(), std::io::Error> {
+        use std::io::Write;
+        let temp = path.with_extension(format!("tmp-{}", std::process::id()));
+        {
+            let mut file = std::fs::File::create(&temp)?;
+            file.write_all(bytes)?;
+            file.sync_all()?;
+        }
+        std::fs::rename(temp, path)?;
+        Ok(())
+    }
+
+    fn pending_files(&self) -> Result<Vec<std::path::PathBuf>, std::io::Error> {
+        let mut files = Vec::new();
+        for entry in std::fs::read_dir(&self.directory)? {
+            let path = entry?.path();
+            if path.extension().and_then(|ext| ext.to_str()) == Some("msg") {
+                files.push(path);
+            }
+        }
+        files.sort();
+        Ok(files)
+    }
+
+    fn seen_files(&self) -> Result<Vec<std::path::PathBuf>, std::io::Error> {
+        let mut files = Vec::new();
+        for entry in std::fs::read_dir(&self.directory)? {
+            let path = entry?.path();
+            if path.extension().and_then(|ext| ext.to_str()) == Some("seen") {
+                files.push(path);
+            }
+        }
+        Ok(files)
+    }
+
+    fn read_message(path: &std::path::Path) -> Result<DeliveryEnvelope, DiskQueueError> {
+        Ok(serde_json::from_slice(&std::fs::read(path)?)?)
+    }
+
+    fn usage(&self) -> Result<(usize, usize), DiskQueueError> {
+        let mut bytes = 0usize;
+        let files = self.pending_files()?;
+        for path in &files {
+            let item = Self::read_message(path)?;
+            bytes = bytes.saturating_add(item.ciphertext.len());
+        }
+        Ok((files.len(), bytes))
+    }
+
+    /// Removes expired messages and replay markers. Pending messages recover
+    /// their replay marker if a process stopped between the two atomic writes.
+    pub fn expire(&self, now: u64) -> Result<(), DiskQueueError> {
+        for path in self.pending_files()? {
+            let item = Self::read_message(&path)?;
+            if now >= item.expires_at {
+                let _ = std::fs::remove_file(&path);
+            } else {
+                let seen = self.seen_path(&item.message_id);
+                if !seen.exists() {
+                    Self::write_atomic(&seen, item.expires_at.to_string().as_bytes())?;
+                }
+            }
+        }
+        for path in self.seen_files()? {
+            let expiry = std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|value| value.parse::<u64>().ok());
+            if expiry.map(|value| now >= value).unwrap_or(true) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+        Ok(())
+    }
+
+    /// Persists an opaque envelope. Repeated IDs are rejected even after the
+    /// recipient acknowledges the message, until the original expiry time.
+    pub fn enqueue(&self, item: DeliveryEnvelope, now: u64) -> Result<bool, DiskQueueError> {
+        item.validate(now)?;
+        self.expire(now)?;
+        let message_path = self.message_path(&item.message_id);
+        let seen_path = self.seen_path(&item.message_id);
+        if message_path.exists() || seen_path.exists() {
+            return Ok(false);
+        }
+        let (entries, bytes) = self.usage()?;
+        if entries >= self.max_entries
+            || bytes.saturating_add(item.ciphertext.len()) > self.max_bytes
+            || self.seen_files()?.len() >= self.max_seen {
+            return Err(DiskQueueError::Envelope(EnvelopeError::QueueFull));
+        }
+        let serialized = serde_json::to_vec(&item)?;
+        Self::write_atomic(&message_path, &serialized)?;
+        Self::write_atomic(&seen_path, item.expires_at.to_string().as_bytes())?;
+        Ok(true)
+    }
+
+    /// Returns pending envelopes without deleting them. The caller must call
+    /// acknowledge only after the recipient has durably saved the ciphertext.
+    pub fn pending_for(
+        &self,
+        recipient: &[u8],
+        now: u64,
+    ) -> Result<Vec<DeliveryEnvelope>, DiskQueueError> {
+        self.expire(now)?;
+        let mut matches = Vec::new();
+        for path in self.pending_files()? {
+            let item = Self::read_message(&path)?;
+            if item.recipient_id == recipient {
+                matches.push(item);
+            }
+        }
+        Ok(matches)
+    }
+
+    /// Deletes a pending message only after an authenticated recipient ack.
+    /// The replay marker remains until expiry so the sender cannot re-enqueue it.
+    pub fn acknowledge(
+        &self,
+        message_id: [u8; 16],
+        now: u64,
+    ) -> Result<bool, DiskQueueError> {
+        self.expire(now)?;
+        let path = self.message_path(&message_id);
+        if !path.exists() {
+            return Ok(false);
+        }
+        std::fs::remove_file(path)?;
+        Ok(true)
+    }
+
+    pub fn len(&self) -> Result<usize, DiskQueueError> {
+        Ok(self.pending_files()?.len())
+    }
+
+    pub fn is_empty(&self) -> Result<bool, DiskQueueError> {
+        Ok(self.len()? == 0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
