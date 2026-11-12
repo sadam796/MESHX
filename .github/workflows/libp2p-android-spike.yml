@@ -59,3 +59,6 @@ jobs:
       - name: Run transport queue tests
         working-directory: spikes/libp2p-transport
         run: cargo test
+      - name: Compile self-hostable relay server
+        working-directory: spikes/libp2p-transport
+        run: cargo check --bin meshx-relay-server
