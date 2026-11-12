@@ -342,6 +342,18 @@ impl From<serde_json::Error> for DiskQueueError {
     fn from(value: serde_json::Error) -> Self { Self::Serialization(value) }
 }
 
+impl std::fmt::Display for DiskQueueError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Envelope(error) => write!(formatter, "mailbox envelope error: {error:?}"),
+            Self::Io(error) => write!(formatter, "mailbox storage error: {error}"),
+            Self::Serialization(error) => write!(formatter, "mailbox serialization error: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for DiskQueueError {}
+
 impl DiskQueue {
     pub fn open(
         directory: impl Into<std::path::PathBuf>,
@@ -350,6 +362,11 @@ impl DiskQueue {
     ) -> Result<Self, DiskQueueError> {
         let directory = directory.into();
         std::fs::create_dir_all(&directory)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))?;
+        }
         Ok(Self {
             directory,
             max_entries,
@@ -375,6 +392,11 @@ impl DiskQueue {
         let temp = path.with_extension(format!("tmp-{}", std::process::id()));
         {
             let mut file = std::fs::File::create(&temp)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+            }
             file.write_all(bytes)?;
             file.sync_all()?;
         }
@@ -473,12 +495,28 @@ impl DiskQueue {
         recipient: &[u8],
         now: u64,
     ) -> Result<Vec<DeliveryEnvelope>, DiskQueueError> {
+        self.pending_for_limit(recipient, now, usize::MAX)
+    }
+
+    /// Returns at most the requested number of messages without deleting them.
+    pub fn pending_for_limit(
+        &self,
+        recipient: &[u8],
+        now: u64,
+        limit: usize,
+    ) -> Result<Vec<DeliveryEnvelope>, DiskQueueError> {
         self.expire(now)?;
         let mut matches = Vec::new();
+        if limit == 0 {
+            return Ok(matches);
+        }
         for path in self.pending_files()? {
             let item = Self::read_message(&path)?;
             if item.recipient_id == recipient {
                 matches.push(item);
+                if matches.len() >= limit {
+                    break;
+                }
             }
         }
         Ok(matches)
@@ -500,12 +538,131 @@ impl DiskQueue {
         Ok(true)
     }
 
+    /// Removes a message only when the authenticated peer is its intended recipient.
+    pub fn acknowledge_for(
+        &self,
+        message_id: [u8; 16],
+        recipient: &[u8],
+        now: u64,
+    ) -> Result<bool, DiskQueueError> {
+        self.expire(now)?;
+        let path = self.message_path(&message_id);
+        if !path.exists() {
+            return Ok(false);
+        }
+        let item = Self::read_message(&path)?;
+        if item.recipient_id != recipient {
+            return Ok(false);
+        }
+        std::fs::remove_file(path)?;
+        Ok(true)
+    }
+
     pub fn len(&self) -> Result<usize, DiskQueueError> {
         Ok(self.pending_files()?.len())
     }
 
     pub fn is_empty(&self) -> Result<bool, DiskQueueError> {
         Ok(self.len()? == 0)
+    }
+}
+
+/// Maximum number of envelopes returned by one mailbox fetch request.
+pub const MAX_MAILBOX_FETCH_MESSAGES: usize = 8;
+
+/// Requests supported by the relay's durable offline mailbox protocol.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MailboxRequest {
+    /// Store an already end-to-end-encrypted envelope for its recipient.
+    Store(DeliveryEnvelope),
+    /// Fetch messages addressed to the authenticated connection's Peer ID.
+    Fetch,
+    /// Acknowledge durable receipt of one previously fetched message.
+    Acknowledge { message_id: [u8; 16] },
+}
+
+/// Stable outcomes for mailbox requests.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MailboxRejectReason {
+    Unauthorized,
+    InvalidEnvelope,
+    QueueFull,
+    StorageUnavailable,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MailboxResponse {
+    Stored { accepted: bool, duplicate: bool },
+    Messages { envelopes: Vec<DeliveryEnvelope> },
+    Acknowledged { removed: bool },
+    Rejected { reason: MailboxRejectReason },
+}
+
+/// Request/response behaviour exposed by the relay server for mailbox operations.
+pub type MeshxMailboxBehaviour =
+    libp2p::request_response::cbor::Behaviour<MailboxRequest, MailboxResponse>;
+
+pub fn new_mailbox_behaviour() -> MeshxMailboxBehaviour {
+    libp2p::request_response::cbor::Behaviour::new(
+        [(
+            libp2p::StreamProtocol::new("/meshx/mailbox/1"),
+            libp2p::request_response::ProtocolSupport::Full,
+        )],
+        libp2p::request_response::Config::default(),
+    )
+}
+
+/// Handles a mailbox request using the authenticated libp2p connection identity.
+/// Sender and recipient IDs are PeerId byte encodings; the relay never trusts IDs
+/// supplied by a caller unless they match the authenticated Noise peer.
+pub fn handle_mailbox_request(
+    queue: &DiskQueue,
+    authenticated_peer: &libp2p::PeerId,
+    request: MailboxRequest,
+    now: u64,
+) -> MailboxResponse {
+    let peer_bytes = authenticated_peer.to_bytes();
+    match request {
+        MailboxRequest::Store(envelope) => {
+            if envelope.sender_id != peer_bytes
+                || libp2p::PeerId::from_bytes(&envelope.recipient_id).is_err()
+            {
+                return MailboxResponse::Rejected {
+                    reason: MailboxRejectReason::Unauthorized,
+                };
+            }
+            match queue.enqueue(envelope, now) {
+                Ok(true) => MailboxResponse::Stored { accepted: true, duplicate: false },
+                Ok(false) => MailboxResponse::Stored { accepted: true, duplicate: true },
+                Err(DiskQueueError::Envelope(EnvelopeError::QueueFull)) => {
+                    MailboxResponse::Rejected { reason: MailboxRejectReason::QueueFull }
+                }
+                Err(DiskQueueError::Envelope(_)) => {
+                    MailboxResponse::Rejected { reason: MailboxRejectReason::InvalidEnvelope }
+                }
+                Err(_) => MailboxResponse::Rejected {
+                    reason: MailboxRejectReason::StorageUnavailable,
+                },
+            }
+        }
+        MailboxRequest::Fetch => match queue.pending_for_limit(
+            &peer_bytes,
+            now,
+            MAX_MAILBOX_FETCH_MESSAGES,
+        ) {
+            Ok(envelopes) => MailboxResponse::Messages { envelopes },
+            Err(_) => MailboxResponse::Rejected {
+                reason: MailboxRejectReason::StorageUnavailable,
+            },
+        },
+        MailboxRequest::Acknowledge { message_id } => {
+            match queue.acknowledge_for(message_id, &peer_bytes, now) {
+                Ok(removed) => MailboxResponse::Acknowledged { removed },
+                Err(_) => MailboxResponse::Rejected {
+                    reason: MailboxRejectReason::StorageUnavailable,
+                },
+            }
+        }
     }
 }
 
@@ -718,6 +875,87 @@ mod tests {
             assert!(queue.is_empty().unwrap());
             assert!(!queue.enqueue(item, 104).unwrap(), "acked IDs stay deduplicated until expiry");
         }
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn mailbox_protocol_authenticates_sender_and_recipient_and_requires_ack() {
+        let directory = disk_queue_test_dir("mailbox-protocol");
+        let queue = DiskQueue::open(&directory, 8, 1024).unwrap();
+        let sender = libp2p::identity::Keypair::generate_ed25519().public().to_peer_id();
+        let recipient = libp2p::identity::Keypair::generate_ed25519().public().to_peer_id();
+        let attacker = libp2p::identity::Keypair::generate_ed25519().public().to_peer_id();
+        let item = DeliveryEnvelope {
+            message_id: [41; 16],
+            sender_id: sender.to_bytes(),
+            recipient_id: recipient.to_bytes(),
+            created_at: 100,
+            expires_at: 500,
+            hop_limit: 8,
+            ciphertext: b"opaque-mls-ciphertext".to_vec(),
+        };
+
+        assert_eq!(
+            handle_mailbox_request(&queue, &attacker, MailboxRequest::Store(item.clone()), 101),
+            MailboxResponse::Rejected { reason: MailboxRejectReason::Unauthorized }
+        );
+        assert_eq!(
+            handle_mailbox_request(&queue, &sender, MailboxRequest::Store(item.clone()), 101),
+            MailboxResponse::Stored { accepted: true, duplicate: false }
+        );
+        assert_eq!(
+            handle_mailbox_request(&queue, &sender, MailboxRequest::Store(item.clone()), 102),
+            MailboxResponse::Stored { accepted: true, duplicate: true }
+        );
+
+        assert_eq!(
+            handle_mailbox_request(&queue, &attacker, MailboxRequest::Fetch, 103),
+            MailboxResponse::Messages { envelopes: vec![] }
+        );
+        assert_eq!(
+            handle_mailbox_request(&queue, &attacker, MailboxRequest::Acknowledge { message_id: item.message_id }, 104),
+            MailboxResponse::Acknowledged { removed: false }
+        );
+        assert_eq!(queue.len().unwrap(), 1, "a different peer cannot delete the recipient's message");
+
+        assert_eq!(
+            handle_mailbox_request(&queue, &recipient, MailboxRequest::Fetch, 105),
+            MailboxResponse::Messages { envelopes: vec![item.clone()] }
+        );
+        assert_eq!(queue.len().unwrap(), 1, "fetch does not delete before durable recipient ack");
+        assert_eq!(
+            handle_mailbox_request(&queue, &recipient, MailboxRequest::Acknowledge { message_id: item.message_id }, 106),
+            MailboxResponse::Acknowledged { removed: true }
+        );
+        assert!(queue.is_empty().unwrap());
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn mailbox_fetch_is_bounded_to_a_small_batch() {
+        let directory = disk_queue_test_dir("mailbox-batch");
+        let queue = DiskQueue::open(&directory, 32, 4096).unwrap();
+        let sender = libp2p::identity::Keypair::generate_ed25519().public().to_peer_id();
+        let recipient = libp2p::identity::Keypair::generate_ed25519().public().to_peer_id();
+        for id in 0..(MAX_MAILBOX_FETCH_MESSAGES as u8 + 2) {
+            let item = DeliveryEnvelope {
+                message_id: [id + 1; 16],
+                sender_id: sender.to_bytes(),
+                recipient_id: recipient.to_bytes(),
+                created_at: 100,
+                expires_at: 500,
+                hop_limit: 8,
+                ciphertext: vec![id + 1],
+            };
+            assert!(queue.enqueue(item, 101).unwrap());
+        }
+        match handle_mailbox_request(&queue, &recipient, MailboxRequest::Fetch, 102) {
+            MailboxResponse::Messages { envelopes } => {
+                assert_eq!(envelopes.len(), MAX_MAILBOX_FETCH_MESSAGES);
+            }
+            other => panic!("unexpected mailbox response: {other:?}"),
+        }
+        assert_eq!(queue.len().unwrap(), MAX_MAILBOX_FETCH_MESSAGES + 2);
         let _ = std::fs::remove_dir_all(directory);
     }
 
