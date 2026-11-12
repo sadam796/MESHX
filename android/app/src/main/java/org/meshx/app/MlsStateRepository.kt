@@ -1,6 +1,7 @@
 package org.meshx.app
 
 import android.content.Context
+import org.json.JSONObject
 
 /**
  * App-facing boundary between the native OpenMLS provider and Android Keystore.
@@ -93,6 +94,65 @@ internal class MlsStateRepository(context: Context) {
             snapshot.fill(0)
         }
     }
+
+    /**
+     * Encrypts a chat payload with the saved MLS group and persists the advanced
+     * sender ratchet before returning opaque ciphertext for transport.
+     */
+    fun encryptAndAdvanceGroupState(groupRecordId: String, plaintext: ByteArray): ByteArray {
+        val state = vault.load(groupRecordId)
+            ?: throw IllegalStateException("Saved MLS group state was not found.")
+        var result: ByteArray? = null
+        try {
+            result = NativeMeshx.encryptMlsApplicationMessage(state, plaintext)
+            val bundle = JSONObject(result.toString(Charsets.UTF_8))
+            val updatedState = bundle.getJSONArray("updated_group_snapshot").toByteArrayValue()
+            val ciphertext = bundle.getJSONArray("ciphertext").toByteArrayValue()
+            try {
+                vault.save(groupRecordId, updatedState)
+                check(NativeMeshx.validateMlsGroupSnapshot(updatedState)) {
+                    "Advanced sender MLS state failed validation."
+                }
+            } finally {
+                updatedState.fill(0)
+            }
+            return ciphertext
+        } finally {
+            state.fill(0)
+            result?.fill(0)
+        }
+    }
+
+    /**
+     * Authenticates incoming MLS ciphertext and persists the advanced receiver
+     * ratchet before returning the decrypted application payload.
+     */
+    fun decryptAndAdvanceGroupState(groupRecordId: String, ciphertext: ByteArray): ByteArray {
+        val state = vault.load(groupRecordId)
+            ?: throw IllegalStateException("Saved MLS group state was not found.")
+        var result: ByteArray? = null
+        try {
+            result = NativeMeshx.decryptMlsApplicationMessage(state, ciphertext)
+            val bundle = JSONObject(result.toString(Charsets.UTF_8))
+            val updatedState = bundle.getJSONArray("updated_group_snapshot").toByteArrayValue()
+            val plaintext = bundle.getJSONArray("ciphertext").toByteArrayValue()
+            try {
+                check(NativeMeshx.validateMlsGroupSnapshot(updatedState)) {
+                    "Advanced receiver MLS state failed validation."
+                }
+                vault.save(groupRecordId, updatedState)
+            } finally {
+                updatedState.fill(0)
+            }
+            return plaintext
+        } finally {
+            state.fill(0)
+            result?.fill(0)
+        }
+    }
+
+    private fun org.json.JSONArray.toByteArrayValue(): ByteArray =
+        ByteArray(length()) { index -> getInt(index).toByte() }
 
     fun delete(recordId: String) = vault.delete(recordId)
 }
