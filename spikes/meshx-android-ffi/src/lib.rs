@@ -14,10 +14,30 @@ mod mls_group;
 
 use futures::StreamExt;
 use jni::{objects::{JByteArray, JObject, JString}, sys::{jboolean, jbyteArray, jstring, JNI_FALSE, JNI_TRUE}, JNIEnv};
-use libp2p::{swarm::SwarmEvent, tcp, yamux, Multiaddr, SwarmBuilder};
+use libp2p::{swarm::SwarmEvent, tcp, yamux, multiaddr::Protocol, Multiaddr, SwarmBuilder};
+
+#[derive(libp2p::swarm::NetworkBehaviour)]
+#[behaviour(to_swarm = "MeshxAndroidEvent")]
+struct MeshxAndroidBehaviour {
+    relay: libp2p::relay::client::Behaviour,
+    meshx: meshx_libp2p_transport_spike::MeshxNetworkBehaviour,
+}
+
+#[derive(Debug)]
+enum MeshxAndroidEvent {
+    Relay(libp2p::relay::client::Event),
+    Meshx(meshx_libp2p_transport_spike::MeshxEvent),
+}
+impl From<libp2p::relay::client::Event> for MeshxAndroidEvent {
+    fn from(event: libp2p::relay::client::Event) -> Self { Self::Relay(event) }
+}
+impl From<meshx_libp2p_transport_spike::MeshxEvent> for MeshxAndroidEvent {
+    fn from(event: meshx_libp2p_transport_spike::MeshxEvent) -> Self { Self::Meshx(event) }
+}
 
 enum TransportCommand {
     AddBootstrapPeers(Vec<String>),
+    AddRelayPeer(String),
     FindPeer(libp2p::PeerId),
     SendCiphertext { peer_id: libp2p::PeerId, ciphertext: Vec<u8> },
 }
@@ -88,6 +108,26 @@ fn parse_bootstrap_input(raw: &str) -> Result<Vec<String>, String> {
     Ok(parsed.into_iter().map(|peer| peer.address.to_string()).collect())
 }
 
+fn parse_relay_address(raw: &str) -> Result<Multiaddr, String> {
+    let address = raw.trim().parse::<Multiaddr>()
+        .map_err(|_| "Invalid relay multiaddress.".to_owned())?;
+    if !matches!(address.iter().last(), Some(Protocol::P2p(_))) {
+        return Err("Relay address must end with /p2p/RELAY_PEER_ID.".to_owned());
+    }
+    Ok(address)
+}
+
+fn queue_relay_peer(raw: &str) -> Result<String, String> {
+    let address = parse_relay_address(raw)?;
+    let sender = command_sender_store().lock()
+        .map_err(|_| "MESHX network command queue is unavailable".to_owned())?
+        .clone()
+        .ok_or_else(|| "Start the MESHX network before adding a relay.".to_owned())?;
+    sender.send(TransportCommand::AddRelayPeer(address.to_string()))
+        .map_err(|_| "MESHX network thread is not accepting commands.".to_owned())?;
+    Ok("MESHX relay connection and reservation request queued; waiting for server confirmation.".to_owned())
+}
+
 fn queue_bootstrap_peers(raw: &str) -> Result<String, String> {
     let addresses = parse_bootstrap_input(raw)?;
     if addresses.is_empty() {
@@ -154,6 +194,7 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
             };
 
             runtime.block_on(async move {
+                let mut configured_relays: Vec<Multiaddr> = Vec::new();
                 let builder = match SwarmBuilder::with_existing_identity(keypair)
                     .with_tokio()
                     .with_tcp(
@@ -169,10 +210,22 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
                     }
                 };
 
-                let builder = match builder.with_behaviour(|key| {
-                    meshx_libp2p_transport_spike::new_network_behaviour(
+                let builder = match builder
+                    .with_relay_client(libp2p::noise::Config::new, yamux::Config::default)
+                {
+                    Ok(builder) => builder,
+                    Err(error) => {
+                        set_status(format!("MESHX relay transport setup error: {error}"));
+                        STARTED.store(false, Ordering::SeqCst);
+                        return;
+                    }
+                };
+
+                let builder = match builder.with_behaviour(|key, relay| MeshxAndroidBehaviour {
+                    relay,
+                    meshx: meshx_libp2p_transport_spike::new_network_behaviour(
                         key.public().to_peer_id()
-                    )
+                    ),
                 }) {
                     Ok(builder) => builder,
                     Err(error) => {
@@ -224,12 +277,12 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
                                         "MESHX peer disconnected: {peer_id}; local peer id {thread_peer_label}"
                                     ));
                                 }
-                                SwarmEvent::Behaviour(meshx_libp2p_transport_spike::MeshxEvent::Kad(event)) => {
+                                SwarmEvent::Behaviour(MeshxAndroidEvent::Meshx(meshx_libp2p_transport_spike::MeshxEvent::Kad(event))) => {
                                     set_status(format!(
                                         "MESHX DHT discovery event: {event:?}; local peer id {thread_peer_label}"
                                     ));
                                 }
-                                SwarmEvent::Behaviour(meshx_libp2p_transport_spike::MeshxEvent::Delivery(event)) => {
+                                SwarmEvent::Behaviour(MeshxAndroidEvent::Meshx(meshx_libp2p_transport_spike::MeshxEvent::Delivery(event))) => {
                                     use libp2p::request_response::{Event as RequestEvent, Message as RequestMessage};
                                     match event {
                                         RequestEvent::Message { peer, message, .. } => match message {
@@ -251,7 +304,7 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
                                                     message_id: request.message_id,
                                                     accepted,
                                                 };
-                                                let _ = swarm.behaviour_mut().delivery.send_response(channel, ack);
+                                                let _ = swarm.behaviour_mut().meshx.delivery.send_response(channel, ack);
                                                 set_status(if accepted {
                                                     format!("MESHX received encrypted payload from {peer}; queued in volatile app memory. Not yet decrypted or persisted.")
                                                 } else {
@@ -277,11 +330,46 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
                                         }
                                     }
                                 }
+                                SwarmEvent::Behaviour(MeshxAndroidEvent::Relay(event)) => {
+                                    set_status(format!("MESHX circuit-relay event: {event:?}; local peer id {thread_peer_label}"));
+                                }
                                 _ => {}
                             }
                         }
                         command = command_receiver.recv() => {
                             match command {
+                                Some(TransportCommand::AddRelayPeer(raw_address)) => {
+                                    match parse_relay_address(&raw_address) {
+                                        Ok(relay_address) => {
+                                            let relay_peer = match relay_address.iter().last() {
+                                                Some(Protocol::P2p(peer)) => peer,
+                                                _ => {
+                                                    set_status("MESHX rejected relay address: missing relay Peer ID.".to_owned());
+                                                    continue;
+                                                }
+                                            };
+                                            let mut reservation_address = relay_address.clone();
+                                            reservation_address.push(Protocol::P2pCircuit);
+                                            match swarm.dial(relay_address.clone()) {
+                                                Ok(()) => {
+                                                    match swarm.listen_on(reservation_address) {
+                                                        Ok(listener_id) => {
+                                                            if !configured_relays.contains(&relay_address) {
+                                                                configured_relays.push(relay_address.clone());
+                                                            }
+                                                            set_status(format!(
+                                                                "MESHX relay dial queued for {relay_peer}; circuit reservation listener {listener_id:?} requested. This is not yet a confirmed reservation."
+                                                            ));
+                                                        }
+                                                        Err(error) => set_status(format!("MESHX relay connection requested but reservation failed: {error}")),
+                                                    }
+                                                }
+                                                Err(error) => set_status(format!("MESHX relay dial failed for {relay_peer}: {error}")),
+                                            }
+                                        }
+                                        Err(error) => set_status(format!("MESHX relay address rejected: {error}")),
+                                    }
+                                }
                                 Some(TransportCommand::AddBootstrapPeers(addresses)) => {
                                     let address_refs: Vec<&str> = addresses.iter().map(String::as_str).collect();
                                     match meshx_libp2p_transport_spike::parse_bootstrap_peers(&address_refs) {
@@ -292,7 +380,7 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
                                             );
                                             let dial_queued = dial_results.iter().filter(|result| result.is_ok()).count();
                                             let dht_peers_added = meshx_libp2p_transport_spike::add_dht_bootstrap_peers(
-                                                &mut swarm.behaviour_mut().kad,
+                                                &mut swarm.behaviour_mut().meshx.kad,
                                                 &peers,
                                             );
                                             let bootstrap_result = meshx_libp2p_transport_spike::start_dht_bootstrap(
@@ -339,8 +427,17 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
                                     };
                                     match envelope.validate(now) {
                                         Ok(()) => {
-                                            swarm.behaviour_mut().delivery.send_request(&peer_id, envelope);
-                                            set_status(format!("MESHX direct encrypted-payload request queued for {peer_id}; waiting for remote acknowledgement. No relay/offline delivery."));
+                                            for relay_address in &configured_relays {
+                                                let mut circuit = relay_address.clone();
+                                                circuit.push(Protocol::P2pCircuit);
+                                                circuit.push(Protocol::P2p(peer_id));
+                                                swarm.behaviour_mut().meshx.kad.add_address(&peer_id, circuit.clone());
+                                                if !swarm.is_connected(&peer_id) {
+                                                    let _ = swarm.dial(circuit);
+                                                }
+                                            }
+                                            swarm.behaviour_mut().meshx.delivery.send_request(&peer_id, envelope);
+                                            set_status(format!("MESHX encrypted-payload request queued for {peer_id}; direct/DHT and configured relay routes may be tried. Waiting for remote acknowledgement; this is not offline mailbox delivery."));
                                         }
                                         Err(error) => set_status(format!("MESHX rejected outgoing encrypted payload: {error:?}")),
                                     }
@@ -399,6 +496,21 @@ pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeAddBootstrapPeers(
         Ok(value) => queue_bootstrap_peers(&value.to_string_lossy())
             .unwrap_or_else(|error| format!("MESHX bootstrap error: {error}")),
         Err(error) => format!("MESHX bootstrap list could not be read from Android: {error}"),
+    };
+    jni_string(&mut env, result)
+}
+
+/// Kotlin: NativeMeshx.nativeAddRelayPeer(address: String)
+#[no_mangle]
+pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeAddRelayPeer(
+    mut env: JNIEnv,
+    _this: JObject,
+    raw_address: JString,
+) -> jstring {
+    let result = match env.get_string(&raw_address) {
+        Ok(value) => queue_relay_peer(&value.to_string_lossy())
+            .unwrap_or_else(|error| format!("MESHX relay error: {error}")),
+        Err(error) => format!("MESHX relay error: Relay address could not be read from Android: {error}"),
     };
     jni_string(&mut env, result)
 }
