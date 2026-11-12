@@ -713,3 +713,32 @@ pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeMlsExtractKeyPackage
         }
     }
 }
+
+
+/// Kotlin: NativeMeshx.nativeMlsAddMemberToGroup(groupSnapshot, keyPackage)
+/// Validates the recipient KeyPackage and returns updated sender state + Welcome.
+#[no_mangle]
+pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeMlsAddMemberToGroup(
+    mut env: JNIEnv,
+    _this: JObject,
+    group_snapshot: JByteArray,
+    key_package: JByteArray,
+) -> jbyteArray {
+    let result = env.convert_byte_array(&group_snapshot)
+        .map_err(|error| format!("MLS group snapshot could not be read: {error}"))
+        .and_then(|group_bytes| {
+            env.convert_byte_array(&key_package)
+                .map_err(|error| format!("Recipient KeyPackage could not be read: {error}"))
+                .and_then(|package_bytes| {
+                    mls_group::add_member_to_group_snapshot(&group_bytes, &package_bytes)
+                })
+        });
+    match result {
+        Ok(bytes) => env.byte_array_from_slice(&bytes)
+            .map(|array| array.into_raw()).unwrap_or(std::ptr::null_mut()),
+        Err(error) => {
+            set_status(format!("MESHX MLS member invitation error: {error}"));
+            std::ptr::null_mut()
+        }
+    }
+}
