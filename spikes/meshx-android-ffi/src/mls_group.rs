@@ -491,3 +491,28 @@ pub fn join_group_from_invitation(
         entries,
     }).map_err(|error| format!("Joined MLS group snapshot encoding failed: {error}"))
 }
+
+
+#[cfg(test)]
+mod invitation_join_tests {
+    use super::*;
+
+    #[test]
+    fn recipient_joins_welcome_using_saved_one_use_key_material() {
+        let sender_group = create_group_snapshot(b"meshx-welcome-sender")
+            .expect("create sender MLS group");
+        let recipient_key_state = create_key_package_snapshot(b"meshx-welcome-recipient")
+            .expect("create recipient private KeyPackage state");
+        let recipient_public_key = extract_key_package(&recipient_key_state)
+            .expect("extract recipient public KeyPackage");
+        let invitation_bytes = add_member_to_group_snapshot(&sender_group, &recipient_public_key)
+            .expect("create sender invitation");
+        let invitation: GroupInvitationSnapshot = serde_json::from_slice(&invitation_bytes)
+            .expect("decode invitation");
+        let joined_state = join_group_from_invitation(
+            &recipient_key_state, &invitation.welcome_message, &invitation.ratchet_tree
+        ).expect("recipient processes Welcome and joins group");
+        validate_group_snapshot(&joined_state)
+            .expect("recipient joined group restores with its own signer");
+    }
+}
