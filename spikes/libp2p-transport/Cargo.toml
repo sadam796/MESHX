@@ -7,6 +7,10 @@ publish = false
 [lib]
 path = "src/lib.rs"
 
+[[bin]]
+name = "meshx-relay-server"
+path = "src/bin/relay_server.rs"
+
 [dependencies]
 libp2p = { version = "=0.57.1", default-features = false, features = [
     "autonat",
