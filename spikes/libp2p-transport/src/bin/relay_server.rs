@@ -1,9 +1,60 @@
-//! Self-hostable public libp2p circuit-relay v2 node for MESHX.
-//! This is a reachable-peer relay only; it does not implement offline mailbox delivery.
-//! Keep the relay identity volume private and persistent across container restarts.
+//! Self-hostable libp2p circuit-relay v2 node and durable offline mailbox for MESHX.
+//! The mailbox stores only end-to-end-encrypted envelopes and authenticates mailbox
+//! operations against the libp2p Peer ID established by the Noise connection.
+//! This remains an experimental service; public deployment still needs abuse controls.
 use futures::StreamExt;
-use libp2p::{identity, relay, swarm::SwarmEvent, SwarmBuilder};
-use std::{error::Error, path::PathBuf};
+use libp2p::{
+    identity,
+    relay,
+    request_response::{Event as RequestEvent, Message as RequestMessage},
+    swarm::{NetworkBehaviour, SwarmEvent},
+    SwarmBuilder,
+};
+use meshx_libp2p_transport_spike::{
+    handle_mailbox_request, new_mailbox_behaviour, DiskQueue, MailboxRequest, MailboxResponse,
+    MeshxMailboxBehaviour,
+};
+use std::{error::Error, path::PathBuf, time::{SystemTime, UNIX_EPOCH}};
+
+#[derive(NetworkBehaviour)]
+#[behaviour(to_swarm = "RelayServerEvent")]
+struct RelayServerBehaviour {
+    circuit: relay::Behaviour,
+    mailbox: MeshxMailboxBehaviour,
+}
+
+#[derive(Debug)]
+enum RelayServerEvent {
+    Circuit(relay::Event),
+    Mailbox(RequestEvent<MailboxRequest, MailboxResponse>),
+}
+
+impl From<relay::Event> for RelayServerEvent {
+    fn from(event: relay::Event) -> Self {
+        Self::Circuit(event)
+    }
+}
+
+impl From<RequestEvent<MailboxRequest, MailboxResponse>> for RelayServerEvent {
+    fn from(event: RequestEvent<MailboxRequest, MailboxResponse>) -> Self {
+        Self::Mailbox(event)
+    }
+}
+
+fn unix_time_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
+
+fn env_usize(name: &str, default: usize) -> usize {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(default)
+}
 
 fn load_or_create_identity(path: &PathBuf) -> Result<identity::Keypair, Box<dyn Error>> {
     if path.exists() {
@@ -38,6 +89,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         std::env::var("MESHX_RELAY_KEY_FILE")
             .unwrap_or_else(|_| "./data/relay-identity.key".to_string()),
     );
+    let mailbox_dir = PathBuf::from(
+        std::env::var("MESHX_MAILBOX_DIR")
+            .unwrap_or_else(|_| "./data/mailbox".to_string()),
+    );
+    let mailbox_max_entries = env_usize("MESHX_MAILBOX_MAX_ENTRIES", 1_000);
+    let mailbox_max_bytes = env_usize("MESHX_MAILBOX_MAX_BYTES", 512 * 1024 * 1024);
+    let mailbox = DiskQueue::open(&mailbox_dir, mailbox_max_entries, mailbox_max_bytes)?;
+
     let listen_address = std::env::var("MESHX_RELAY_LISTEN")
         .unwrap_or_else(|_| "/ip4/0.0.0.0/tcp/4001".to_string())
         .parse()?;
@@ -58,11 +117,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
             libp2p::yamux::Config::default,
         )?
         .with_behaviour(|_| {
-            let mut behaviour = relay::Behaviour::new(peer_id, relay::Config::default());
+            let mut circuit = relay::Behaviour::new(peer_id, relay::Config::default());
             // This VPS is intentionally operated as a relay. Do not wait for
             // external-address discovery before advertising the HOP protocol.
-            behaviour.set_status(Some(relay::Status::Enable));
-            behaviour
+            circuit.set_status(Some(relay::Status::Enable));
+            RelayServerBehaviour {
+                circuit,
+                mailbox: new_mailbox_behaviour(),
+            }
         })?
         .build();
 
@@ -75,23 +137,61 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
     println!("MESHX relay peer ID: {peer_id}");
     println!("Relay identity file: {}", key_path.display());
+    println!(
+        "MESHX durable mailbox ready at {}; limits: {} messages / {} bytes",
+        mailbox_dir.display(),
+        mailbox_max_entries,
+        mailbox_max_bytes
+    );
+    println!(
+        "Mailbox protocol: /meshx/mailbox/1; fetch returns at most {} messages per request",
+        meshx_libp2p_transport_spike::MAX_MAILBOX_FETCH_MESSAGES
+    );
 
     loop {
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {
-                println!("Shutdown requested; stopping relay.");
+                println!("Shutdown requested; stopping relay and mailbox service.");
                 break;
             }
             event = swarm.select_next_some() => {
-                if let SwarmEvent::NewListenAddr { address, .. } = event {
-                    println!("Relay listening on {address}/p2p/{peer_id}");
+                match event {
+                    SwarmEvent::NewListenAddr { address, .. } => {
+                        println!("Relay listening on {address}/p2p/{peer_id}");
+                    }
+                    SwarmEvent::Behaviour(RelayServerEvent::Mailbox(event)) => {
+                        match event {
+                            RequestEvent::Message { peer, message, .. } => match message {
+                                RequestMessage::Request { request, channel, .. } => {
+                                    let response = handle_mailbox_request(
+                                        &mailbox,
+                                        &peer,
+                                        request,
+                                        unix_time_seconds(),
+                                    );
+                                    if swarm.behaviour_mut().mailbox.send_response(channel, response).is_err() {
+                                        eprintln!("Mailbox response channel closed for authenticated peer {peer}");
+                                    }
+                                }
+                                RequestMessage::Response { .. } => {}
+                            },
+                            RequestEvent::InboundFailure { peer, error, .. } => {
+                                eprintln!("Mailbox request from {peer} failed: {error}");
+                            }
+                            RequestEvent::OutboundFailure { peer, error, .. } => {
+                                eprintln!("Mailbox response to {peer} failed: {error}");
+                            }
+                            RequestEvent::ResponseSent { .. } => {}
+                        }
+                    }
+                    SwarmEvent::Behaviour(RelayServerEvent::Circuit(_)) => {}
+                    _ => {}
                 }
             }
         }
     }
     Ok(())
 }
-
 
 #[cfg(test)]
 mod tests {
