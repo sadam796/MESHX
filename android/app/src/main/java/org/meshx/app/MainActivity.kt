@@ -352,6 +352,57 @@ private fun MeshxHome() {
     var mlsCiphertextText by remember { mutableStateOf("") }
     var mlsIncomingCiphertextText by remember { mutableStateOf("") }
     var mlsBusy by remember { mutableStateOf(false) }
+
+    // Poll only the currently open, already-joined contact group. Native polling
+    // leaves messages from other contacts in the receive queue.
+    LaunchedEffect(nativeTransportReady, selectedChat) {
+        val chatId = selectedChat
+        if (nativeTransportReady && chatId != null) {
+            while (true) {
+                delay(1500)
+                try {
+                    val currentIdentity = identity ?: loadOrCreateIdentity(prefs).also { identity = it }
+                    val peerId = contactTransportPeers.firstOrNull { it.startsWith("$chatId#") }
+                        ?.substringAfter("#")
+                    val groupRecordId = "meshx-chat-" +
+                        listOf(currentIdentity.fingerprint, chatId).sorted().joinToString("-")
+                    if (peerId != null && mlsRepository.restoreAndValidateGroupState(groupRecordId)) {
+                        val rawBatch = NativeMeshx.pollIncomingCiphertexts(peerId)
+                        val batch = org.json.JSONArray(rawBatch)
+                        for (index in 0 until batch.length()) {
+                            val item = batch.getJSONObject(index)
+                            val authenticatedTransportPeer = item.getString("sender_peer_id")
+                            if (authenticatedTransportPeer != peerId) continue
+                            val byteArray = item.getJSONArray("ciphertext")
+                            val encrypted = ByteArray(byteArray.length()) { byteArray.getInt(it).toByte() }
+                            try {
+                                val plaintext = mlsRepository.decryptAndAdvanceGroupState(groupRecordId, encrypted)
+                                try {
+                                    val encoded = Base64.encodeToString(plaintext, Base64.NO_WRAP)
+                                    val entry = "$chatId#${System.currentTimeMillis()}#$encoded"
+                                    val updated = localMessages + entry
+                                    check(prefs.edit().putStringSet(
+                                        "local_messages",
+                                        updated.map { encryptLocalRecord(it) }.toSet()
+                                    ).commit()) { "Received message could not be saved securely." }
+                                    localMessages = updated
+                                    mlsChatStatus = "New encrypted message received, authenticated, and saved."
+                                } finally {
+                                    plaintext.fill(0)
+                                }
+                            } catch (messageError: Exception) {
+                                mlsChatStatus = "Incoming message could not be authenticated/decrypted: ${messageError.localizedMessage ?: "unknown error"}"
+                            } finally {
+                                encrypted.fill(0)
+                            }
+                        }
+                    }
+                } catch (receiveError: Exception) {
+                    mlsChatStatus = "Receive error: ${receiveError.localizedMessage ?: "unknown error"}"
+                }
+            }
+        }
+    }
     val persistContactIdentity: (String, ParsedPublicIdentity) -> Unit = { raw, parsed ->
         val id = parsed.fingerprint
         val updated = (contacts + id).distinct()
@@ -543,7 +594,7 @@ private fun MeshxHome() {
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.fillMaxWidth().padding(16.dp)) {
                             Text("Chat with $chatId", style = MaterialTheme.typography.titleMedium)
-                            Text("MLS encryption setup: invitation aur ciphertext copy/paste se exchange honge. Internet delivery agle phase mein connect hogi.", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+                            Text("MLS encryption ke saath direct peer-to-peer Internet send/receive connected hai. Dono phones reachable hone chahiye; relay aur offline delivery abhi nahi hai.", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
                             val ownIdentity = identity ?: runCatching { loadOrCreateIdentity(prefs).also { identity = it } }.getOrNull()
                             val groupRecordId = ownIdentity?.let { "meshx-chat-" + listOf(it.fingerprint, chatId).sorted().joinToString("-") }
                             val keyPackageRecordId = ownIdentity?.let { "meshx-keypackage-" + it.fingerprint + "-" + chatId }
@@ -605,8 +656,27 @@ private fun MeshxHome() {
                                 } catch (e: Exception) { mlsChatStatus = "Encryption error: ${e.localizedMessage ?: "unknown"}" }
                                 finally { mlsBusy = false }
                             }) { Text("Encrypt message") }
-                            OutlinedTextField(value = mlsCiphertextText, onValueChange = { mlsCiphertextText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Encrypted ciphertext to share") }, minLines = 2)
-                            OutlinedTextField(value = mlsIncomingCiphertextText, onValueChange = { mlsIncomingCiphertextText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Paste received ciphertext") }, minLines = 2)
+                            OutlinedTextField(value = mlsCiphertextText, onValueChange = { mlsCiphertextText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Encrypted ciphertext (retry / manual fallback)") }, minLines = 2)
+                            val chatTransportPeerId = contactTransportPeers.firstOrNull { it.startsWith("$chatId#") }?.substringAfter("#")
+                            Button(
+                                enabled = !mlsBusy && nativeTransportReady && chatTransportPeerId != null && mlsCiphertextText.isNotBlank(),
+                                onClick = {
+                                    mlsBusy = true
+                                    try {
+                                        val encrypted = Base64.decode(mlsCiphertextText.trim(), Base64.DEFAULT)
+                                        try {
+                                            mlsChatStatus = NativeMeshx.sendCiphertext(chatTransportPeerId!!, encrypted)
+                                        } finally {
+                                            encrypted.fill(0)
+                                        }
+                                    } catch (sendError: Exception) {
+                                        mlsChatStatus = "Send error: ${sendError.localizedMessage ?: "unknown error"}"
+                                    } finally {
+                                        mlsBusy = false
+                                    }
+                                }
+                            ) { Text("Send encrypted message directly") }
+                            OutlinedTextField(value = mlsIncomingCiphertextText, onValueChange = { mlsIncomingCiphertextText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Paste received ciphertext (manual fallback)") }, minLines = 2)
                             Button(enabled = !mlsBusy && groupRecordId != null && mlsIncomingCiphertextText.isNotBlank() && runCatching { mlsRepository.restoreAndValidateGroupState(groupRecordId) }.getOrDefault(false), onClick = {
                                 mlsBusy = true
                                 try {
@@ -662,10 +732,10 @@ private fun MeshxHome() {
                 Text("A bootstrap address only starts peer discovery. It does not guarantee that another contact is reachable, that messages are delivered, or that a relay is available.")
                 Text("MESHX2 contacts can be searched by their signed transport Peer ID. DHT results are candidate routing peers only; they do not prove that the recipient is online.")
                 Spacer(Modifier.height(8.dp))
-                Text("Messaging engine — in development", style = MaterialTheme.typography.titleMedium)
-                Text("Global end-to-end encrypted message delivery, durable relays, media transfer, and nearby Bluetooth / Wi-Fi messaging are not connected yet.")
+                Text("Direct encrypted messaging", style = MaterialTheme.typography.titleMedium)
+                Text("Chat screen ab MLS ciphertext ko saved contact ke signed Peer ID par direct libp2p transport se bhej sakti hai aur open chat mein incoming messages receive/decrypt kar sakti hai. Yeh direct delivery hai — public relay, NAT traversal, durable offline queue, background delivery, media transfer aur Bluetooth / Wi-Fi abhi complete nahi hain.")
                 Spacer(Modifier.height(12.dp))
-                Text("Contact public keys and fingerprints are stored locally for future secure session setup. No message is sent yet. Recovery phrase, encrypted backup and messaging transport are still to be built.", style = MaterialTheme.typography.bodySmall)
+                Text("Send request queue hona delivery/read receipt nahi hai. Message ciphertext retry field mein rehta hai; incoming messages sirf matching contact ke joined MLS group mein decrypt hote hain. Recovery phrase aur encrypted backup abhi baaki hain.", style = MaterialTheme.typography.bodySmall)
             }
         }
     }
