@@ -662,7 +662,7 @@ private fun MeshxHome() {
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.fillMaxWidth().padding(16.dp)) {
                             Text("Chat with $chatId", style = MaterialTheme.typography.titleMedium)
-                            Text("MLS encryption ke saath direct peer-to-peer delivery available hai. Dono phones reachable hon to direct path use hoga; live circuit relay configured ho to relay path bhi use ho sakta hai. Offline message delivery abhi available nahi hai.", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+                            Text("MLS ciphertext direct peer ko bheja jata hai. Configured relay connected ho to app encrypted message ko offline mailbox mein bhi save karne ki request bhejti hai aur har 15 second baad pending messages check karti hai. Offline delivery tabhi kaam karegi jab compatible public relay server live ho.", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
                             val ownIdentity = identity ?: runCatching { loadOrCreateIdentity(prefs).also { identity = it } }.getOrNull()
                             val groupRecordId = ownIdentity?.let { "meshx-chat-" + listOf(it.fingerprint, chatId).sorted().joinToString("-") }
                             val keyPackageRecordId = ownIdentity?.let { "meshx-keypackage-" + it.fingerprint + "-" + chatId }
@@ -743,7 +743,7 @@ private fun MeshxHome() {
                                         mlsBusy = false
                                     }
                                 }
-                            ) { Text("Send encrypted message directly") }
+                            ) { Text("Send encrypted message (direct + relay mailbox)") }
                             OutlinedTextField(value = mlsIncomingCiphertextText, onValueChange = { mlsIncomingCiphertextText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Paste received ciphertext (manual fallback)") }, minLines = 2)
                             Button(enabled = !mlsBusy && groupRecordId != null && mlsIncomingCiphertextText.isNotBlank() && runCatching { mlsRepository.restoreAndValidateGroupState(groupRecordId) }.getOrDefault(false), onClick = {
                                 mlsBusy = true
@@ -778,13 +778,13 @@ private fun MeshxHome() {
                 }
 
                 Spacer(Modifier.height(24.dp))
-                Text("Circuit relay connection", style = MaterialTheme.typography.titleMedium)
-                Text("Optional: enter a live MESHX circuit-relay v2 server multiaddress. The relay forwards encrypted traffic; it cannot read MLS ciphertext.")
+                Text("Circuit relay + offline mailbox", style = MaterialTheme.typography.titleMedium)
+                Text("Optional: enter a live MESHX relay server multiaddress. The app requests offline mailbox storage and fetches pending messages while connected. The relay cannot read properly MLS-encrypted ciphertext.")
                 OutlinedTextField(
                     value = relayAddress,
                     onValueChange = { relayAddress = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Relay server multiaddress") },
+                    label = { Text("Relay / mailbox server multiaddress") },
                     placeholder = { Text("/ip4/host/tcp/4001/p2p/RELAY_PEER_ID") },
                     minLines = 1
                 )
@@ -802,7 +802,7 @@ private fun MeshxHome() {
                     },
                     enabled = nativeTransportReady && relayAddress.isNotBlank()
                 ) { Text("Connect to relay server") }
-                Text("Reservation tabhi confirm hogi jab native relay event success report kare. Sirf address save karna live connection ka saboot nahi hai.")
+                Text("Relay connection aur mailbox request status neeche update hoga. Sirf address save karna live server ya successful offline delivery ka saboot nahi hai.")
 
                 Text("Internet peer discovery", style = MaterialTheme.typography.titleMedium)
                 Text("Optional: add bootstrap node multiaddresses, one per line. These are network entry points, not contacts. You must use a live MESHX-compatible node operated by you or a trusted independent operator.")
@@ -827,7 +827,7 @@ private fun MeshxHome() {
                 Text("MESHX2 contacts can be searched by their signed transport Peer ID. DHT results are candidate routing peers only; they do not prove that the recipient is online.")
                 Spacer(Modifier.height(8.dp))
                 Text("Direct encrypted messaging", style = MaterialTheme.typography.titleMedium)
-                Text("Chat screen MLS ciphertext ko saved contact ke signed Peer ID par libp2p transport se bhej sakti hai. Direct path ya configured aur confirmed circuit-relay path use ho sakta hai. Durable offline queue, background delivery, media transfer aur Bluetooth / Wi-Fi abhi complete nahi hain.")
+                Text("Chat screen MLS ciphertext ko saved contact ke signed Peer ID par bhejti hai. Configured relay par offline mailbox store/fetch/ack protocol bhi connect hai. Public server deployment, background delivery, media transfer aur Bluetooth / Wi-Fi abhi complete ya verify nahi hue hain.")
                 Spacer(Modifier.height(12.dp))
                 Text("Send request queue hona delivery/read receipt nahi hai. Message ciphertext retry field mein rehta hai; incoming messages sirf matching contact ke joined MLS group mein decrypt hote hain. Recovery phrase aur encrypted backup abhi baaki hain.", style = MaterialTheme.typography.bodySmall)
             }
