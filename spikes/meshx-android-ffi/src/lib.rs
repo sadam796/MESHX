@@ -452,7 +452,17 @@ pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativePollIncomingCipherte
         Ok(mut queue) => queue.drain(..).collect::<Vec<_>>(),
         Err(_) => return jni_string(&mut env, "[]".to_owned()),
     };
-    let json = serde_json::to_string(&messages).unwrap_or_else(|_| "[]".to_owned());
+    // Expose the authenticated libp2p sender ID beside the opaque MLS bytes so
+    // Android can route the payload to the matching saved contact/group.
+    let payloads = messages.into_iter().filter_map(|message| {
+        let sender_peer_id = libp2p::PeerId::from_bytes(&message.sender_id).ok()?.to_string();
+        Some(serde_json::json!({
+            "sender_peer_id": sender_peer_id,
+            "ciphertext": message.ciphertext,
+            "message_id": message.message_id,
+        }))
+    }).collect::<Vec<_>>();
+    let json = serde_json::to_string(&payloads).unwrap_or_else(|_| "[]".to_owned());
     jni_string(&mut env, json)
 }
 
