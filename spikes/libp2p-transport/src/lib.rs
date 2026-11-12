@@ -686,4 +686,55 @@ mod tests {
         assert_eq!(queue.used_bytes(), 0);
         assert!(queue.is_empty());
     }
+
+    fn disk_queue_test_dir(label: &str) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        let path = std::env::temp_dir().join(format!(
+            "meshx-{label}-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn disk_queue_survives_restart_and_requires_ack_before_removal() {
+        let directory = disk_queue_test_dir("durable");
+        let item = envelope(31, b"bob", 500);
+        {
+            let queue = DiskQueue::open(&directory, 8, 1024).unwrap();
+            assert!(queue.enqueue(item.clone(), 101).unwrap());
+            assert_eq!(queue.len().unwrap(), 1);
+        }
+        {
+            let queue = DiskQueue::open(&directory, 8, 1024).unwrap();
+            let pending = queue.pending_for(b"bob", 102).unwrap();
+            assert_eq!(pending, vec![item.clone()]);
+            assert_eq!(queue.len().unwrap(), 1, "fetch must not delete before ack");
+            assert!(queue.acknowledge(item.message_id, 103).unwrap());
+            assert!(queue.is_empty().unwrap());
+            assert!(!queue.enqueue(item, 104).unwrap(), "acked IDs stay deduplicated until expiry");
+        }
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn disk_queue_enforces_capacity_and_expires_messages() {
+        let directory = disk_queue_test_dir("limits");
+        let queue = DiskQueue::open(&directory, 1, 20).unwrap();
+        let mut first = envelope(32, b"bob", 110);
+        first.ciphertext = vec![1; 12];
+        assert!(queue.enqueue(first, 101).unwrap());
+        assert!(matches!(
+            queue.enqueue(envelope(33, b"bob", 500), 102),
+            Err(DiskQueueError::Envelope(EnvelopeError::QueueFull))
+        ));
+        queue.expire(110).unwrap();
+        assert!(queue.is_empty().unwrap());
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
 }
