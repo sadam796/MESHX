@@ -3,6 +3,12 @@ package org.meshx.app
 import android.content.Context
 import org.json.JSONObject
 
+internal data class MlsInvitation(
+    val welcomeMessage: ByteArray,
+    val ratchetTree: ByteArray
+)
+
+
 /**
  * App-facing boundary between the native OpenMLS provider and Android Keystore.
  * Secret snapshot byte arrays are cleared from the Kotlin heap after each operation.
@@ -72,6 +78,38 @@ internal class MlsStateRepository(context: Context) {
         } finally {
             keyPackageState.fill(0)
             joinedGroupSnapshot?.fill(0)
+        }
+    }
+
+    /**
+     * Adds a contact to the saved group, persists the sender's advanced epoch,
+     * and returns the Welcome material for secure delivery to that contact.
+     */
+    fun addContactToGroup(
+        groupRecordId: String,
+        recipientPublicKeyPackage: ByteArray
+    ): MlsInvitation {
+        val state = vault.load(groupRecordId)
+            ?: throw IllegalStateException("Saved sender MLS group state was not found.")
+        var result: ByteArray? = null
+        try {
+            result = NativeMeshx.addMlsMemberToGroup(state, recipientPublicKeyPackage)
+            val bundle = JSONObject(result.toString(Charsets.UTF_8))
+            val updatedState = bundle.getJSONArray("updated_group_snapshot").toByteArrayValue()
+            val welcome = bundle.getJSONArray("welcome_message").toByteArrayValue()
+            val tree = bundle.getJSONArray("ratchet_tree").toByteArrayValue()
+            try {
+                check(NativeMeshx.validateMlsGroupSnapshot(updatedState)) {
+                    "Updated sender MLS group failed validation."
+                }
+                vault.save(groupRecordId, updatedState)
+            } finally {
+                updatedState.fill(0)
+            }
+            return MlsInvitation(welcome, tree)
+        } finally {
+            state.fill(0)
+            result?.fill(0)
         }
     }
 
