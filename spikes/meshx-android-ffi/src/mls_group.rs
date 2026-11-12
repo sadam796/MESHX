@@ -258,3 +258,69 @@ mod tests {
     }
 
 }
+
+
+#[derive(Serialize, Deserialize)]
+struct KeyPackageSnapshot {
+    version: u32,
+    signer_public: Vec<u8>,
+    key_package: Vec<u8>,
+    entries: Vec<(Vec<u8>, Vec<u8>)>,
+}
+
+/// Creates a one-use MLS KeyPackage and snapshots its private init/encryption
+/// material. The snapshot must be encrypted by the Android Keystore vault.
+pub fn create_key_package_snapshot(identity: &[u8]) -> Result<Vec<u8>, String> {
+    use openmls::prelude::{KeyPackage, tls_codec::Serialize};
+
+    if identity.is_empty() || identity.len() > 256 {
+        return Err("MLS credential identity must contain 1 to 256 bytes".to_owned());
+    }
+    let provider = OpenMlsRustCrypto::default();
+    let signer = SignatureKeyPair::new(MLS_CIPHERSUITE.signature_algorithm())
+        .map_err(|error| format!("MLS signing key generation failed: {error:?}"))?;
+    signer.store(provider.storage())
+        .map_err(|error| format!("MLS signing key storage failed: {error:?}"))?;
+    let credential = BasicCredential::new(identity.to_vec());
+    let credential_with_key = CredentialWithKey {
+        credential: credential.into(),
+        signature_key: signer.to_public_vec().into(),
+    };
+    let bundle = KeyPackage::builder()
+        .build(MLS_CIPHERSUITE, &provider, &signer, credential_with_key)
+        .map_err(|error| format!("MLS KeyPackage creation failed: {error:?}"))?;
+    let key_package = bundle.key_package().tls_serialize_detached()
+        .map_err(|error| format!("MLS KeyPackage serialization failed: {error:?}"))?;
+    let entries = provider.storage().values.read()
+        .map_err(|_| "OpenMLS provider storage lock is poisoned".to_owned())?
+        .iter().map(|(key, value)| (key.clone(), value.clone())).collect();
+    serde_json::to_vec(&KeyPackageSnapshot {
+        version: SNAPSHOT_VERSION,
+        signer_public: signer.public().to_vec(),
+        key_package,
+        entries,
+    }).map_err(|error| format!("MLS KeyPackage snapshot encoding failed: {error}"))
+}
+
+/// Extracts the public one-use KeyPackage from an authenticated vault snapshot.
+pub fn extract_key_package(snapshot_bytes: &[u8]) -> Result<Vec<u8>, String> {
+    use openmls::prelude::{KeyPackageIn, ProtocolVersion, tls_codec::Deserialize};
+
+    let snapshot: KeyPackageSnapshot = serde_json::from_slice(snapshot_bytes)
+        .map_err(|error| format!("MLS KeyPackage snapshot is invalid: {error}"))?;
+    if snapshot.version != SNAPSHOT_VERSION || snapshot.key_package.is_empty() {
+        return Err("MLS KeyPackage snapshot version or payload is invalid".to_owned());
+    }
+    let provider = OpenMlsRustCrypto::default();
+    provider.storage().values.write()
+        .map_err(|_| "OpenMLS provider storage lock is poisoned".to_owned())?
+        .extend(snapshot.entries);
+    SignatureKeyPair::read(provider.storage(), &snapshot.signer_public,
+        MLS_CIPHERSUITE.signature_algorithm())
+        .ok_or_else(|| "MLS KeyPackage signer was not restored".to_owned())?;
+    let input = KeyPackageIn::tls_deserialize_exact_bytes(&snapshot.key_package)
+        .map_err(|error| format!("MLS KeyPackage decoding failed: {error:?}"))?;
+    input.validate(provider.crypto(), ProtocolVersion::Mls10)
+        .map_err(|error| format!("MLS KeyPackage signature validation failed: {error:?}"))?;
+    Ok(snapshot.key_package)
+}
