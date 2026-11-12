@@ -88,56 +88,64 @@ async fn sender_stores_recipient_fetches_and_acknowledges_over_network() {
         while !acknowledged {
             tokio::select! {
                 event = sender.select_next_some() => {
-                    if let SwarmEvent::ConnectionEstablished { peer_id, .. } = event {
-                        if peer_id == server_peer && !store_sent {
-                            sender.behaviour_mut().send_request(
-                                &server_peer,
-                                MailboxRequest::Store(envelope.clone()),
-                            );
-                            store_sent = true;
+                    match event {
+                        SwarmEvent::ConnectionEstablished { peer_id, .. } => {
+                            if peer_id == server_peer && !store_sent {
+                                sender.behaviour_mut().send_request(
+                                    &server_peer,
+                                    MailboxRequest::Store(envelope.clone()),
+                                );
+                                store_sent = true;
+                            }
                         }
-                    } else if let SwarmEvent::Behaviour(RequestEvent::Message {
-                        peer,
-                        message: RequestMessage::Response { response, .. },
-                        ..
-                    }) = event {
-                        assert_eq!(peer, server_peer);
-                        assert_eq!(
-                            response,
-                            MailboxResponse::Stored { accepted: true, duplicate: false }
-                        );
-                        stored = true;
+                        SwarmEvent::Behaviour(RequestEvent::Message {
+                            peer,
+                            message: RequestMessage::Response { response, .. },
+                            ..
+                        }) => {
+                            assert_eq!(peer, server_peer);
+                            assert_eq!(
+                                response,
+                                MailboxResponse::Stored { accepted: true, duplicate: false }
+                            );
+                            stored = true;
+                        }
+                        _ => {}
                     }
                 }
                 event = recipient.select_next_some() => {
-                    if let SwarmEvent::ConnectionEstablished { peer_id, .. } = event {
-                        if peer_id == server_peer {
-                            recipient_connected = true;
-                        }
-                    } else if let SwarmEvent::Behaviour(RequestEvent::Message {
-                        peer,
-                        message: RequestMessage::Response { response, .. },
-                        ..
-                    }) = event {
-                        assert_eq!(peer, server_peer);
-                        match response {
-                            MailboxResponse::Messages { envelopes } => {
-                                assert_eq!(envelopes, vec![envelope.clone()]);
-                                assert!(!ack_sent);
-                                recipient.behaviour_mut().send_request(
-                                    &server_peer,
-                                    MailboxRequest::Acknowledge {
-                                        message_id: envelope.message_id,
-                                    },
-                                );
-                                ack_sent = true;
+                    match event {
+                        SwarmEvent::ConnectionEstablished { peer_id, .. } => {
+                            if peer_id == server_peer {
+                                recipient_connected = true;
                             }
-                            MailboxResponse::Acknowledged { removed } => {
-                                assert!(removed, "recipient ack must remove its queued message");
-                                acknowledged = true;
-                            }
-                            other => panic!("unexpected mailbox response: {other:?}"),
                         }
+                        SwarmEvent::Behaviour(RequestEvent::Message {
+                            peer,
+                            message: RequestMessage::Response { response, .. },
+                            ..
+                        }) => {
+                            assert_eq!(peer, server_peer);
+                            match response {
+                                MailboxResponse::Messages { envelopes } => {
+                                    assert_eq!(envelopes, vec![envelope.clone()]);
+                                    assert!(!ack_sent);
+                                    recipient.behaviour_mut().send_request(
+                                        &server_peer,
+                                        MailboxRequest::Acknowledge {
+                                            message_id: envelope.message_id,
+                                        },
+                                    );
+                                    ack_sent = true;
+                                }
+                                MailboxResponse::Acknowledged { removed } => {
+                                    assert!(removed, "recipient ack must remove its queued message");
+                                    acknowledged = true;
+                                }
+                                other => panic!("unexpected mailbox response: {other:?}"),
+                            }
+                        }
+                        _ => {}
                     }
                 }
                 event = server.select_next_some() => {
