@@ -339,6 +339,10 @@ private fun MeshxHome() {
             if (nativeTransportReady && savedBootstrapPeers.isNotBlank()) {
                 nativeTransportStatus = NativeMeshx.addBootstrapPeers(savedBootstrapPeers)
             }
+            val savedRelayAddress = prefs.getString("relay_address", "") ?: ""
+            if (nativeTransportReady && savedRelayAddress.isNotBlank()) {
+                nativeTransportStatus = NativeMeshx.addRelayPeer(savedRelayAddress)
+            }
         } catch (error: Exception) {
             nativeTransportStatus = "MESHX transport identity error: ${error.localizedMessage ?: "secure identity unavailable"}"
             nativeTransportReady = false
@@ -658,7 +662,7 @@ private fun MeshxHome() {
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.fillMaxWidth().padding(16.dp)) {
                             Text("Chat with $chatId", style = MaterialTheme.typography.titleMedium)
-                            Text("MLS encryption ke saath direct peer-to-peer Internet send/receive connected hai. Dono phones reachable hone chahiye; relay aur offline delivery abhi nahi hai.", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+                            Text("MLS encryption ke saath direct peer-to-peer delivery available hai. Dono phones reachable hon to direct path use hoga; live circuit relay configured ho to relay path bhi use ho sakta hai. Offline message delivery abhi available nahi hai.", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
                             val ownIdentity = identity ?: runCatching { loadOrCreateIdentity(prefs).also { identity = it } }.getOrNull()
                             val groupRecordId = ownIdentity?.let { "meshx-chat-" + listOf(it.fingerprint, chatId).sorted().joinToString("-") }
                             val keyPackageRecordId = ownIdentity?.let { "meshx-keypackage-" + it.fingerprint + "-" + chatId }
@@ -786,9 +790,15 @@ private fun MeshxHome() {
                 )
                 Button(
                     onClick = {
-                        prefs.edit().putString("relay_address", relayAddress.trim()).apply()
-                        status = NativeMeshx.addRelayPeer(relayAddress)
-                        error = if (status?.contains("error:", ignoreCase = true) == true || status?.contains("rejected", ignoreCase = true) == true) status else null
+                        val result = NativeMeshx.addRelayPeer(relayAddress.trim())
+                        status = result
+                        val rejected = result.contains("error:", ignoreCase = true)
+                            || result.contains("rejected", ignoreCase = true)
+                        error = if (rejected) result else null
+                        if (!rejected) {
+                            relayAddress = relayAddress.trim()
+                            prefs.edit().putString("relay_address", relayAddress).apply()
+                        }
                     },
                     enabled = nativeTransportReady && relayAddress.isNotBlank()
                 ) { Text("Connect to relay server") }
@@ -817,7 +827,7 @@ private fun MeshxHome() {
                 Text("MESHX2 contacts can be searched by their signed transport Peer ID. DHT results are candidate routing peers only; they do not prove that the recipient is online.")
                 Spacer(Modifier.height(8.dp))
                 Text("Direct encrypted messaging", style = MaterialTheme.typography.titleMedium)
-                Text("Chat screen ab MLS ciphertext ko saved contact ke signed Peer ID par direct libp2p transport se bhej sakti hai aur open chat mein incoming messages receive/decrypt kar sakti hai. Yeh direct delivery hai — public relay, NAT traversal, durable offline queue, background delivery, media transfer aur Bluetooth / Wi-Fi abhi complete nahi hain.")
+                Text("Chat screen MLS ciphertext ko saved contact ke signed Peer ID par libp2p transport se bhej sakti hai. Direct path ya configured aur confirmed circuit-relay path use ho sakta hai. Durable offline queue, background delivery, media transfer aur Bluetooth / Wi-Fi abhi complete nahi hain.")
                 Spacer(Modifier.height(12.dp))
                 Text("Send request queue hona delivery/read receipt nahi hai. Message ciphertext retry field mein rehta hai; incoming messages sirf matching contact ke joined MLS group mein decrypt hote hain. Recovery phrase aur encrypted backup abhi baaki hain.", style = MaterialTheme.typography.bodySmall)
             }
