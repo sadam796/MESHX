@@ -589,7 +589,7 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
                                                 );
                                             }
                                         },
-                                        RequestEvent::OutboundFailure { peer, request_id, error } => {
+                                        RequestEvent::OutboundFailure { peer, request_id, error, .. } => {
                                             mailbox_fetch_in_flight.remove(&peer);
                                             if let Some(PendingMailboxRequest::Acknowledge(message_id)) =
                                                 pending_mailbox_requests.remove(&request_id) {
