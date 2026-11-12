@@ -80,8 +80,9 @@ internal object NativeMeshx {
     }
 
     /**
-     * Sends opaque MLS/application ciphertext to a directly reachable libp2p peer.
-     * This does not encrypt plaintext, discover a route, or provide offline delivery.
+     * Sends opaque MLS/application ciphertext to a peer over a direct path or a
+     * confirmed circuit-relay route. This does not encrypt plaintext or provide
+     * offline delivery.
      */
     fun sendCiphertext(peerId: String, ciphertext: ByteArray): String = loadError?.let {
         "MESHX send error: Native bridge unavailable: $it"
