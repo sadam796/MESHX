@@ -70,10 +70,10 @@ internal class MlsStateRepository(context: Context) {
             joinedGroupSnapshot = NativeMeshx.joinMlsGroupFromWelcome(
                 keyPackageState, welcomeMessage, ratchetTree
             )
-            vault.save(groupRecordId, joinedGroupSnapshot)
             check(NativeMeshx.validateMlsGroupSnapshot(joinedGroupSnapshot)) {
                 "Joined MLS group failed restore validation."
             }
+            vault.save(groupRecordId, joinedGroupSnapshot)
             vault.delete(keyPackageRecordId)
         } finally {
             keyPackageState.fill(0)
@@ -147,10 +147,10 @@ internal class MlsStateRepository(context: Context) {
             val updatedState = bundle.getJSONArray("updated_group_snapshot").toByteArrayValue()
             val ciphertext = bundle.getJSONArray("ciphertext").toByteArrayValue()
             try {
-                vault.save(groupRecordId, updatedState)
                 check(NativeMeshx.validateMlsGroupSnapshot(updatedState)) {
                     "Advanced sender MLS state failed validation."
                 }
+                vault.save(groupRecordId, updatedState)
             } finally {
                 updatedState.fill(0)
             }
