@@ -328,6 +328,7 @@ pub struct DiskQueue {
 #[derive(Debug)]
 pub enum DiskQueueError {
     Envelope(EnvelopeError),
+    SenderQuotaExceeded,
     Io(std::io::Error),
     Serialization(serde_json::Error),
 }
@@ -346,6 +347,7 @@ impl std::fmt::Display for DiskQueueError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Envelope(error) => write!(formatter, "mailbox envelope error: {error:?}"),
+            Self::SenderQuotaExceeded => write!(formatter, "mailbox sender quota exceeded"),
             Self::Io(error) => write!(formatter, "mailbox storage error: {error}"),
             Self::Serialization(error) => write!(formatter, "mailbox serialization error: {error}"),
         }
@@ -469,6 +471,18 @@ impl DiskQueue {
     /// Persists an opaque envelope. Repeated IDs are rejected even after the
     /// recipient acknowledges the message, until the original expiry time.
     pub fn enqueue(&self, item: DeliveryEnvelope, now: u64) -> Result<bool, DiskQueueError> {
+        self.enqueue_with_sender_limits(item, now, self.max_entries, self.max_bytes)
+    }
+
+    /// Persists an envelope while enforcing global and per-sender pending limits.
+    /// Duplicate IDs remain idempotent and do not consume quota a second time.
+    pub fn enqueue_with_sender_limits(
+        &self,
+        item: DeliveryEnvelope,
+        now: u64,
+        sender_max_entries: usize,
+        sender_max_bytes: usize,
+    ) -> Result<bool, DiskQueueError> {
         item.validate(now)?;
         self.expire(now)?;
         let message_path = self.message_path(&item.message_id);
@@ -481,6 +495,19 @@ impl DiskQueue {
             || bytes.saturating_add(item.ciphertext.len()) > self.max_bytes
             || self.seen_files()?.len() >= self.max_seen {
             return Err(DiskQueueError::Envelope(EnvelopeError::QueueFull));
+        }
+        let mut sender_entries = 0usize;
+        let mut sender_bytes = 0usize;
+        for path in self.pending_files()? {
+            let pending = Self::read_message(&path)?;
+            if pending.sender_id == item.sender_id {
+                sender_entries = sender_entries.saturating_add(1);
+                sender_bytes = sender_bytes.saturating_add(pending.ciphertext.len());
+            }
+        }
+        if sender_entries >= sender_max_entries
+            || sender_bytes.saturating_add(item.ciphertext.len()) > sender_max_bytes {
+            return Err(DiskQueueError::SenderQuotaExceeded);
         }
         let serialized = serde_json::to_vec(&item)?;
         Self::write_atomic(&message_path, &serialized)?;
@@ -554,6 +581,9 @@ impl DiskQueue {
 }
 
 /// Maximum number of envelopes returned by one mailbox fetch request.
+pub const DEFAULT_SENDER_MAX_ENTRIES: usize = 100;
+pub const DEFAULT_SENDER_MAX_BYTES: usize = 32 * 1024 * 1024;
+
 pub const MAX_MAILBOX_FETCH_MESSAGES: usize = 8;
 
 /// Requests supported by the relay's durable offline mailbox protocol.
@@ -573,6 +603,7 @@ pub enum MailboxRejectReason {
     Unauthorized,
     InvalidEnvelope,
     QueueFull,
+    SenderQuotaExceeded,
     RateLimited,
     StorageUnavailable,
 }
@@ -618,11 +649,14 @@ pub fn handle_mailbox_request(
                     reason: MailboxRejectReason::Unauthorized,
                 };
             }
-            match queue.enqueue(envelope, now) {
+            match queue.enqueue_with_sender_limits(envelope, now, DEFAULT_SENDER_MAX_ENTRIES, DEFAULT_SENDER_MAX_BYTES) {
                 Ok(true) => MailboxResponse::Stored { accepted: true, duplicate: false },
                 Ok(false) => MailboxResponse::Stored { accepted: true, duplicate: true },
                 Err(DiskQueueError::Envelope(EnvelopeError::QueueFull)) => {
                     MailboxResponse::Rejected { reason: MailboxRejectReason::QueueFull }
+                }
+                Err(DiskQueueError::SenderQuotaExceeded) => {
+                    MailboxResponse::Rejected { reason: MailboxRejectReason::SenderQuotaExceeded }
                 }
                 Err(DiskQueueError::Envelope(_)) => {
                     MailboxResponse::Rejected { reason: MailboxRejectReason::InvalidEnvelope }
