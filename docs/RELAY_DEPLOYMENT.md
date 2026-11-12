@@ -5,7 +5,7 @@ This repository now contains a self-hostable libp2p circuit-relay v2 server bina
 ## What it provides
 
 - A public TCP listener (default port 4001).
-- libp2p Noise/Yamux transport and circuit-relay v2 reservations/forwarding.
+- libp2p Noise/Yamux transport and circuit-relay v2 reservations/forwarding. The HOP protocol is explicitly enabled for this dedicated relay service.
 - A persistent Ed25519 relay identity file, so the relay Peer ID remains stable across restarts.
 - A non-root container process and a persistent Docker volume for the relay identity.
 
@@ -30,6 +30,7 @@ The Compose volume `meshx-relay-data` preserves the private relay identity. Back
 
 - `MESHX_RELAY_LISTEN`: libp2p multiaddress to listen on. Default `/ip4/0.0.0.0/tcp/4001`.
 - `MESHX_RELAY_KEY_FILE`: private identity file path. Default `./data/relay-identity.key`.
+- `MESHX_RELAY_PUBLIC_ADDRESS`: optional public-facing multiaddress without the terminal `/p2p/<PEER_ID>`, for example `/ip4/<PUBLIC_IP>/tcp/4001`. Set this in the VPS environment so the relay can advertise the address in reservation vouchers. If omitted, users must enter the VPS address directly in the app.
 
 ## Release and security limitations
 
