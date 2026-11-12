@@ -41,11 +41,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let listen_address = std::env::var("MESHX_RELAY_LISTEN")
         .unwrap_or_else(|_| "/ip4/0.0.0.0/tcp/4001".to_string())
         .parse()?;
-    let public_address = std::env::var("MESHX_RELAY_PUBLIC_ADDRESS")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .map(|value| value.parse())
-        .transpose()?;
+    let public_address: Option<libp2p::Multiaddr> =
+        std::env::var("MESHX_RELAY_PUBLIC_ADDRESS")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .map(|value| value.parse::<libp2p::Multiaddr>())
+            .transpose()?;
 
     let identity = load_or_create_identity(&key_path)?;
     let peer_id = identity.public().to_peer_id();
