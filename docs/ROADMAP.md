@@ -42,7 +42,7 @@ A planned feature is not implemented until it has working tests on the intended 
 ## Stage 3 — decentralized routing and resilience
 - [ ] Add independent community-operated relays and/or a suitable peer-routing layer.
 - [ ] Replace the in-memory queue with durable, encrypted store-and-forward storage.
-- [ ] Add abuse controls, rate limits, spam resistance, and relay opt-in controls.
+- [ ] Complete abuse controls, storage quotas, spam resistance, and relay opt-in controls (basic per-authenticated-peer mailbox request rate limiting is implemented; broader protections remain).
 - [ ] Test relay failure and switching between independent routes.
 - [ ] Never claim that a route-free or offline recipient can receive immediately.
 
