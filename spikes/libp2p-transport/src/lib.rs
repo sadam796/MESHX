@@ -524,7 +524,7 @@ impl DiskQueue {
 
     /// Deletes a pending message only after an authenticated recipient ack.
     /// The replay marker remains until expiry so the sender cannot re-enqueue it.
-    pub fn acknowledge(
+    fn acknowledge(
         &self,
         message_id: [u8; 16],
         now: u64,
@@ -871,7 +871,7 @@ mod tests {
             let pending = queue.pending_for(b"bob", 102).unwrap();
             assert_eq!(pending, vec![item.clone()]);
             assert_eq!(queue.len().unwrap(), 1, "fetch must not delete before ack");
-            assert!(queue.acknowledge(item.message_id, 103).unwrap());
+            assert!(queue.acknowledge_for(item.message_id, b"bob", 103).unwrap());
             assert!(queue.is_empty().unwrap());
             assert!(!queue.enqueue(item, 104).unwrap(), "acked IDs stay deduplicated until expiry");
         }
