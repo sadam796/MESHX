@@ -87,7 +87,7 @@ async fn two_clients_can_connect_through_a_local_circuit_relay() {
                     if let SwarmEvent::NewListenAddr { address, .. } = event {
                         if address.iter().any(|part| matches!(part, Protocol::P2pCircuit)) {
                             assert!(
-                                address.iter().any(|part| matches!(part, Protocol::P2p(peer) if *peer == client_a_peer)),
+                                address.iter().any(|part| matches!(part, Protocol::P2p(peer) if peer == client_a_peer)),
                                 "relay reservation address must identify client A"
                             );
                             if !client_b_dial_started {
