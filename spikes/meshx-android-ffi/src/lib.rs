@@ -742,3 +742,35 @@ pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeMlsAddMemberToGroup(
         }
     }
 }
+
+
+/// Kotlin: NativeMeshx.nativeMlsJoinGroupFromWelcome(keyPackageState, welcome, tree)
+/// Joins the invitation using the recipient's locally persisted private MLS state.
+#[no_mangle]
+pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeMlsJoinGroupFromWelcome(
+    mut env: JNIEnv,
+    _this: JObject,
+    key_package_state: JByteArray,
+    welcome_message: JByteArray,
+    ratchet_tree: JByteArray,
+) -> jbyteArray {
+    let result = env.convert_byte_array(&key_package_state)
+        .map_err(|error| format!("Recipient MLS state could not be read: {error}"))
+        .and_then(|state| {
+            env.convert_byte_array(&welcome_message)
+                .map_err(|error| format!("MLS Welcome could not be read: {error}"))
+                .and_then(|welcome| {
+                    env.convert_byte_array(&ratchet_tree)
+                        .map_err(|error| format!("MLS ratchet tree could not be read: {error}"))
+                        .and_then(|tree| mls_group::join_group_from_invitation(&state, &welcome, &tree))
+                })
+        });
+    match result {
+        Ok(bytes) => env.byte_array_from_slice(&bytes)
+            .map(|array| array.into_raw()).unwrap_or(std::ptr::null_mut()),
+        Err(error) => {
+            set_status(format!("MESHX MLS group join error: {error}"));
+            std::ptr::null_mut()
+        }
+    }
+}
