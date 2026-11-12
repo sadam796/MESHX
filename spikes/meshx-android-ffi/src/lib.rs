@@ -3,8 +3,10 @@
 //! discovery, MLS sessions, message sending, relays, or global delivery.
 
 use std::{
-    sync::{atomic::{AtomicBool, Ordering}, Mutex, OnceLock},
+    collections::VecDeque,
+    sync::{atomic::{AtomicBool, AtomicU64, Ordering}, Mutex, OnceLock},
     thread,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 mod mls_snapshot;
@@ -17,6 +19,35 @@ use libp2p::{swarm::SwarmEvent, tcp, yamux, Multiaddr, SwarmBuilder};
 enum TransportCommand {
     AddBootstrapPeers(Vec<String>),
     FindPeer(libp2p::PeerId),
+    SendCiphertext { peer_id: libp2p::PeerId, ciphertext: Vec<u8> },
+}
+
+const MAX_PENDING_INCOMING: usize = 128;
+static NEXT_MESSAGE_ID: AtomicU64 = AtomicU64::new(1);
+static INCOMING_MESSAGES: OnceLock<Mutex<VecDeque<meshx_libp2p_transport_spike::DeliveryEnvelope>>> = OnceLock::new();
+
+fn incoming_messages() -> &'static Mutex<VecDeque<meshx_libp2p_transport_spike::DeliveryEnvelope>> {
+    INCOMING_MESSAGES.get_or_init(|| Mutex::new(VecDeque::new()))
+}
+
+fn unix_time_seconds() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
+
+fn queue_ciphertext(raw_peer_id: &str, ciphertext: Vec<u8>) -> Result<String, String> {
+    if ciphertext.is_empty() || ciphertext.len() > meshx_libp2p_transport_spike::MAX_CIPHERTEXT_BYTES {
+        return Err("Encrypted payload must be between 1 byte and 1 MiB.".to_owned());
+    }
+    let peer_id = parse_peer_id_input(raw_peer_id)?;
+    let sender = command_sender_store().lock()
+        .map_err(|_| "MESHX network command queue is unavailable".to_owned())?
+        .clone()
+        .ok_or_else(|| "Start the MESHX network before sending a message.".to_owned())?;
+    sender.send(TransportCommand::SendCiphertext { peer_id, ciphertext })
+        .map_err(|_| "MESHX network thread is not accepting commands.".to_owned())?;
+    Ok("MESHX encrypted payload queued for direct peer delivery. This is not a delivered/read receipt.".to_owned())
 }
 
 static STARTED: AtomicBool = AtomicBool::new(false);
@@ -198,8 +229,53 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
                                         "MESHX DHT discovery event: {event:?}; local peer id {thread_peer_label}"
                                     ));
                                 }
-                                SwarmEvent::Behaviour(meshx_libp2p_transport_spike::MeshxEvent::Delivery(_)) => {
-                                    set_status(format!("MESHX delivery transport event; local peer id {thread_peer_label}"));
+                                SwarmEvent::Behaviour(meshx_libp2p_transport_spike::MeshxEvent::Delivery(event)) => {
+                                    use libp2p::request_response::{Event as RequestEvent, Message as RequestMessage};
+                                    match event {
+                                        RequestEvent::Message { peer, message } => match message {
+                                            RequestMessage::Request { request, channel, .. } => {
+                                                let now = unix_time_seconds();
+                                                let local_id = swarm.local_peer_id().to_bytes();
+                                                let sender_matches = request.sender_id == peer.to_bytes();
+                                                let recipient_matches = request.recipient_id == local_id;
+                                                let valid = request.validate(now).is_ok() && sender_matches && recipient_matches;
+                                                let accepted = if valid {
+                                                    if let Ok(mut queue) = incoming_messages().lock() {
+                                                        if queue.len() < MAX_PENDING_INCOMING {
+                                                            queue.push_back(request.clone());
+                                                            true
+                                                        } else { false }
+                                                    } else { false }
+                                                } else { false };
+                                                let ack = meshx_libp2p_transport_spike::DeliveryAck {
+                                                    message_id: request.message_id,
+                                                    accepted,
+                                                };
+                                                let _ = swarm.behaviour_mut().delivery.send_response(channel, ack);
+                                                set_status(if accepted {
+                                                    format!("MESHX received encrypted payload from {peer}; queued in volatile app memory. Not yet decrypted or persisted.")
+                                                } else {
+                                                    format!("MESHX rejected invalid, misaddressed, or over-capacity payload from {peer}.")
+                                                });
+                                            }
+                                            RequestMessage::Response { response, .. } => {
+                                                set_status(if response.accepted {
+                                                    format!("MESHX peer {peer} accepted the encrypted payload into its volatile receive queue; delivery is not durable.")
+                                                } else {
+                                                    format!("MESHX peer {peer} rejected the encrypted payload.")
+                                                });
+                                            }
+                                        },
+                                        RequestEvent::OutboundFailure { peer, error, .. } => {
+                                            set_status(format!("MESHX send to {peer} failed: {error}"));
+                                        }
+                                        RequestEvent::InboundFailure { peer, error, .. } => {
+                                            set_status(format!("MESHX receive from {peer} failed: {error}"));
+                                        }
+                                        RequestEvent::ResponseSent { peer, .. } => {
+                                            set_status(format!("MESHX receive acknowledgement sent to {peer}."));
+                                        }
+                                    }
                                 }
                                 _ => {}
                             }
@@ -245,6 +321,29 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
                                     set_status(format!(
                                         "MESHX DHT lookup started for {peer_id}; query {query_id:?}; returned peers are only routing candidates, not proof the contact is online; local peer id {thread_peer_label}"
                                     ));
+                                }
+                                Some(TransportCommand::SendCiphertext { peer_id, ciphertext }) => {
+                                    let now = unix_time_seconds();
+                                    let counter = NEXT_MESSAGE_ID.fetch_add(1, Ordering::Relaxed);
+                                    let mut message_id = [0u8; 16];
+                                    message_id[..8].copy_from_slice(&now.to_be_bytes());
+                                    message_id[8..].copy_from_slice(&counter.to_be_bytes());
+                                    let envelope = meshx_libp2p_transport_spike::DeliveryEnvelope {
+                                        message_id,
+                                        sender_id: swarm.local_peer_id().to_bytes(),
+                                        recipient_id: peer_id.to_bytes(),
+                                        created_at: now,
+                                        expires_at: now.saturating_add(24 * 60 * 60),
+                                        hop_limit: 1,
+                                        ciphertext,
+                                    };
+                                    match envelope.validate(now) {
+                                        Ok(()) => {
+                                            swarm.behaviour_mut().delivery.send_request(&peer_id, envelope);
+                                            set_status(format!("MESHX direct encrypted-payload request queued for {peer_id}; waiting for remote acknowledgement. No relay/offline delivery."));
+                                        }
+                                        Err(error) => set_status(format!("MESHX rejected outgoing encrypted payload: {error:?}")),
+                                    }
                                 }
                                 None => break,
                             }
@@ -317,6 +416,44 @@ pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeFindPeer(
         Err(error) => format!("MESHX peer discovery error: Peer ID could not be read from Android: {error}"),
     };
     jni_string(&mut env, result)
+}
+
+
+/// Kotlin: NativeMeshx.nativeSendCiphertext(peerId: String, ciphertext: ByteArray)
+/// Accepts opaque application ciphertext only; plaintext encryption belongs to the MLS layer.
+#[no_mangle]
+pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeSendCiphertext(
+    mut env: JNIEnv,
+    _this: JObject,
+    raw_peer_id: JString,
+    ciphertext: JByteArray,
+) -> jstring {
+    let peer_id = match env.get_string(&raw_peer_id) {
+        Ok(value) => value.to_string_lossy().into_owned(),
+        Err(error) => return jni_string(&mut env, format!("MESHX send error: Peer ID could not be read: {error}")),
+    };
+    let payload = match env.convert_byte_array(&ciphertext) {
+        Ok(bytes) => bytes,
+        Err(error) => return jni_string(&mut env, format!("MESHX send error: Ciphertext could not be read: {error}")),
+    };
+    let result = queue_ciphertext(&peer_id, payload)
+        .unwrap_or_else(|error| format!("MESHX send error: {error}"));
+    jni_string(&mut env, result)
+}
+
+/// Kotlin: NativeMeshx.nativePollIncomingCiphertexts()
+/// Drains the bounded volatile receive queue as JSON; ciphertext remains opaque.
+#[no_mangle]
+pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativePollIncomingCiphertexts(
+    mut env: JNIEnv,
+    _this: JObject,
+) -> jstring {
+    let messages = match incoming_messages().lock() {
+        Ok(mut queue) => queue.drain(..).collect::<Vec<_>>(),
+        Err(_) => return jni_string(&mut env, "[]".to_owned()),
+    };
+    let json = serde_json::to_string(&messages).unwrap_or_else(|_| "[]".to_owned());
+    jni_string(&mut env, json)
 }
 
 /// Kotlin: NativeMeshx.nativeGenerateIdentity()
