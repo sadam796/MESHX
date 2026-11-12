@@ -180,6 +180,21 @@ private fun loadProcessedIncomingIds(prefs: android.content.SharedPreferences): 
     return processed
 }
 
+private fun loadPendingIncomingEnvelopes(prefs: android.content.SharedPreferences): Map<String, String> {
+    val stored = prefs.getStringSet("pending_incoming_ciphertexts", emptySet())?.toSet() ?: emptySet()
+    val pending = linkedMapOf<String, String>()
+    stored.forEach { record ->
+        try {
+            val json = if (record.startsWith("ENC1:")) decryptLocalRecord(record) else record
+            val id = JSONObject(json).getString("message_id").lowercase()
+            if (id.matches(Regex("[0-9a-f]{32}"))) pending[id] = json
+        } catch (_: Exception) {
+            // Keep unreadable encrypted records untouched for diagnosis/recovery.
+        }
+    }
+    return pending
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -385,18 +400,32 @@ private fun MeshxHome() {
                         listOf(currentIdentity.fingerprint, chatId).sorted().joinToString("-")
                     if (peerId != null && mlsRepository.restoreAndValidateGroupState(groupRecordId)) {
                         val rawBatch = NativeMeshx.pollIncomingCiphertexts(peerId)
+                        // First persist every received opaque envelope locally (AES-GCM)
+                        // so a process restart does not discard messages already read from libp2p.
+                        val pending = loadPendingIncomingEnvelopes(prefs).toMutableMap()
                         val batch = org.json.JSONArray(rawBatch)
-                        val processedIncomingIds = loadProcessedIncomingIds(prefs).toMutableSet()
                         for (index in 0 until batch.length()) {
                             val item = batch.getJSONObject(index)
-                            val authenticatedTransportPeer = item.getString("sender_peer_id")
-                            if (authenticatedTransportPeer != peerId) continue
-                            val messageId = item.getString("message_id").lowercase()
+                            if (item.getString("sender_peer_id") != peerId) continue
+                            val id = item.getString("message_id").lowercase()
+                            if (id !in pending) pending[id] = item.toString()
+                        }
+                        check(prefs.edit().putStringSet(
+                            "pending_incoming_ciphertexts",
+                            pending.values.map { encryptLocalRecord(it) }.toSet()
+                        ).commit()) { "Pending encrypted messages could not be saved to device storage." }
+
+                        val processedIncomingIds = loadProcessedIncomingIds(prefs).toMutableSet()
+                        for ((messageId, rawEnvelope) in pending.toMap()) {
+                            val item = JSONObject(rawEnvelope)
+                            if (item.getString("sender_peer_id") != peerId) continue
                             if (messageId in processedIncomingIds) {
-                                // A previous app interruption may have happened after the
-                                // secure save but before native acknowledgement. Do not advance
-                                // the MLS ratchet twice for the same envelope.
                                 NativeMeshx.ackIncomingCiphertext(messageId)
+                                pending.remove(messageId)
+                                prefs.edit().putStringSet(
+                                    "pending_incoming_ciphertexts",
+                                    pending.values.map { encryptLocalRecord(it) }.toSet()
+                                ).commit()
                                 continue
                             }
                             val byteArray = item.getJSONArray("ciphertext")
@@ -415,6 +444,11 @@ private fun MeshxHome() {
                                     localMessages = updated
                                     processedIncomingIds.add(messageId)
                                     NativeMeshx.ackIncomingCiphertext(messageId)
+                                    pending.remove(messageId)
+                                    check(prefs.edit().putStringSet(
+                                        "pending_incoming_ciphertexts",
+                                        pending.values.map { encryptLocalRecord(it) }.toSet()
+                                    ).commit()) { "Processed message cleanup could not be saved." }
                                     mlsChatStatus = "New encrypted message received, authenticated, saved, and acknowledged."
                                 } finally {
                                     plaintext.fill(0)
