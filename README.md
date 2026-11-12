@@ -20,11 +20,11 @@ The Android prototype currently supports:
 - A bounded in-memory queue and a disk-backed ciphertext mailbox queue prototype with expiry, replay markers, capacity limits, and acknowledgement-before-delete tests.
 - A self-hostable libp2p circuit-relay v2 server binary with persistent relay identity, explicit HOP protocol enablement, configurable public address advertisement, and a Docker Compose deployment recipe (`docs/RELAY_DEPLOYMENT.md`).
 - An experimental network mailbox protocol (`/meshx/mailbox/1`) integrated into the relay server: sender-authenticated store, recipient-scoped fetch, recipient-only acknowledgement, bounded batches, disk persistence, expiry, replay markers, and restrictive Unix file permissions.
-- Android UI/JNI wiring for an optional circuit-relay client, including a saved relay multiaddress, reservation status reporting, and use of relay routes only after a reservation is confirmed.
+- Android UI/JNI wiring for the relay client and experimental mailbox client: configured relay connections, periodic mailbox fetch, encrypted-envelope store requests, and recipient acknowledgements after Android's encrypted local save flow.
 
-The OpenMLS/SQLite spike and mailbox client remain isolated from the Android app. The relay server now has an experimental disk-backed mailbox API, but the Android app does not call it yet. A public relay has not been deployed and an Android-to-public-relay connection has not yet been verified. The circuit-relay server forwards live peer traffic; the separate mailbox API can hold encrypted envelopes for offline recipients once clients are integrated.
+The OpenMLS/SQLite spike remains isolated from the Android app. The Android native transport now calls the experimental relay mailbox protocol when a compatible relay is configured. A public relay has not been deployed and an Android-to-server mailbox exchange has not yet been verified on a running Android device. The mailbox protocol has loopback network tests, but public cross-network offline delivery is not yet verified.
 
-**Not implemented or not yet verified:** identity-change warnings and transport-key rotation confirmation, successful discovery through a reachable public bootstrap node, deployment of a public relay, successful Android-to-public-relay connection, real cross-network message delivery, remotely accessible authenticated offline mailbox service, production end-to-end encrypted chats, encrypted media, Bluetooth/Wi-Fi Direct delivery, recovery phrase, encrypted backup, and iPhone app.
+**Not implemented or not yet verified:** identity-change warnings and transport-key rotation confirmation, successful discovery through a reachable public bootstrap node, deployment of a public relay, successful Android-to-public-relay mailbox exchange, real cross-network offline message delivery, production end-to-end encrypted chats, encrypted media, Bluetooth/Wi-Fi Direct delivery, recovery phrase, encrypted backup, and iPhone app.
 
 ## Product principles
 
@@ -44,7 +44,7 @@ The planned recovery approach is a user-held 12- or 24-word recovery phrase, wit
 
 - `android/` — Android application scaffold and local prototype.
 - `spikes/openmls-android/` — isolated OpenMLS protocol and persistence evaluation; not wired into the app.
-- `spikes/libp2p-transport/` — libp2p peer-connectivity, relay server, and experimental durable mailbox protocol; the Android mailbox client is not yet wired.
+- `spikes/libp2p-transport/` — libp2p peer-connectivity, relay server, and experimental durable mailbox protocol.
 - `docs/ARCHITECTURE.md` — architecture and security boundaries.
 - `docs/ROADMAP.md` — staged implementation plan.
 - `docs/SECURITY_MODEL.md` — current protections, limitations, and release gates.
