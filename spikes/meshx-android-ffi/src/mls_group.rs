@@ -434,3 +434,60 @@ mod invitation_tests {
             .expect("updated sender group remains restorable");
     }
 }
+
+
+/// Processes a Welcome using the recipient's saved one-use KeyPackage private
+/// material and returns a restorable group snapshot for encrypted vault storage.
+pub fn join_group_from_invitation(
+    key_package_snapshot_bytes: &[u8],
+    welcome_message_bytes: &[u8],
+    ratchet_tree_bytes: &[u8],
+) -> Result<Vec<u8>, String> {
+    use openmls::framing::MlsMessageIn;
+    use openmls::prelude::{DeserializeBytes, MlsMessageBodyIn, MlsGroupJoinConfig, RatchetTreeIn, StagedWelcome};
+    use openmls::prelude::tls_codec::Deserialize;
+
+    if key_package_snapshot_bytes.is_empty()
+        || welcome_message_bytes.is_empty()
+        || ratchet_tree_bytes.is_empty()
+    {
+        return Err("Recipient KeyPackage state, Welcome, and ratchet tree are required".to_owned());
+    }
+    let key_snapshot: KeyPackageSnapshot = serde_json::from_slice(key_package_snapshot_bytes)
+        .map_err(|error| format!("Recipient KeyPackage snapshot is invalid: {error}"))?;
+    if key_snapshot.version != SNAPSHOT_VERSION || key_snapshot.key_package.is_empty() {
+        return Err("Recipient KeyPackage snapshot version or payload is invalid".to_owned());
+    }
+    let provider = OpenMlsRustCrypto::default();
+    provider.storage().values.write()
+        .map_err(|_| "OpenMLS provider storage lock is poisoned".to_owned())?
+        .extend(key_snapshot.entries);
+    let signer = SignatureKeyPair::read(
+        provider.storage(), &key_snapshot.signer_public, MLS_CIPHERSUITE.signature_algorithm()
+    ).ok_or_else(|| "Recipient MLS signing key was not restored".to_owned())?;
+
+    let message = MlsMessageIn::tls_deserialize_exact_bytes(welcome_message_bytes)
+        .map_err(|error| format!("MLS Welcome decoding failed: {error:?}"))?;
+    let welcome = match message.extract() {
+        MlsMessageBodyIn::Welcome(value) => value,
+        _ => return Err("Invitation did not contain an MLS Welcome message".to_owned()),
+    };
+    let ratchet_tree = RatchetTreeIn::tls_deserialize_exact_bytes(ratchet_tree_bytes)
+        .map_err(|error| format!("MLS ratchet tree decoding failed: {error:?}"))?;
+    let join_config = MlsGroupJoinConfig::builder().build();
+    let staged = StagedWelcome::new_from_welcome(
+        &provider, &join_config, welcome, Some(ratchet_tree)
+    ).map_err(|error| format!("MLS Welcome processing failed: {error:?}"))?;
+    let group = staged.into_group(&provider)
+        .map_err(|error| format!("Joining MLS group failed: {error:?}"))?;
+
+    let entries = provider.storage().values.read()
+        .map_err(|_| "OpenMLS provider storage lock is poisoned".to_owned())?
+        .iter().map(|(key, value)| (key.clone(), value.clone())).collect();
+    serde_json::to_vec(&GroupSnapshot {
+        version: SNAPSHOT_VERSION,
+        group_id: group.group_id().as_slice().to_vec(),
+        signer_public: signer.public().to_vec(),
+        entries,
+    }).map_err(|error| format!("Joined MLS group snapshot encoding failed: {error}"))
+}
