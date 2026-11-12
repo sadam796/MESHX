@@ -198,7 +198,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         match event {
                             RequestEvent::Message { peer, message, .. } => match message {
                                 RequestMessage::Request { request, channel, .. } => {
-                                    let response = if rate_limiter.allow(peer, Instant::now()) {
+                                    let response = if rate_limiter.allow(peer.clone(), Instant::now()) {
                                         handle_mailbox_request(&mailbox, &peer, request, unix_time_seconds())
                                     } else {
                                         MailboxResponse::Rejected {
