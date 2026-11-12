@@ -524,20 +524,6 @@ impl DiskQueue {
 
     /// Deletes a pending message only after an authenticated recipient ack.
     /// The replay marker remains until expiry so the sender cannot re-enqueue it.
-    fn acknowledge(
-        &self,
-        message_id: [u8; 16],
-        now: u64,
-    ) -> Result<bool, DiskQueueError> {
-        self.expire(now)?;
-        let path = self.message_path(&message_id);
-        if !path.exists() {
-            return Ok(false);
-        }
-        std::fs::remove_file(path)?;
-        Ok(true)
-    }
-
     /// Removes a message only when the authenticated peer is its intended recipient.
     pub fn acknowledge_for(
         &self,
