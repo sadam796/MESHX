@@ -37,6 +37,7 @@ The Compose volume `meshx-relay-data` preserves the private relay identity. Back
 - `MESHX_MAILBOX_MAX_ENTRIES`: global pending-message limit. Default `1000`.
 - `MESHX_MAILBOX_MAX_BYTES`: global pending-ciphertext limit. Default `536870912` (512 MiB).
 - `MESHX_MAILBOX_REQUESTS_PER_MINUTE`: mailbox requests allowed per authenticated Peer ID in each 60-second window. Default `120`; the limiter tracks at most 10,000 peer IDs and rejects new peers when full until old windows expire.
+- Per-sender pending mailbox quota: default `100` messages and `32 MiB` of ciphertext per authenticated sender Peer ID. These are compile-time defaults in this experimental build.
 
 ## Release and security limitations
 
@@ -45,5 +46,5 @@ The Compose volume `meshx-relay-data` preserves the private relay identity. Back
 - Circuit relay v2 forwards live peer traffic; it does not store messages for offline recipients.
 - Mailbox requests are authenticated against the libp2p Peer ID established by the Noise connection: store requires sender_id to match the connected peer; fetch is scoped to that peer; acknowledgement can delete only a message addressed to that peer.
 - The mailbox stores encrypted message envelopes, but routing metadata is visible to the relay and is not encrypted at rest. The mailbox directory is created with mode 0700 and files with mode 0600 on Unix-like hosts.
-- The mailbox has global capacity limits and a per-authenticated-peer request rate limit. Per-peer storage quotas, monitoring, DDoS protection, abuse reporting, operator controls, and service-level guarantees are not provided.
+- The mailbox has global capacity limits, a per-authenticated-peer request rate limit, and per-sender pending storage quotas. Monitoring, DDoS protection, abuse reporting, operator controls, and service-level guarantees are not provided.
 - Run only as an experimental test node until those controls and end-to-end Android integration are completed.
