@@ -46,3 +46,16 @@ jobs:
       - name: Compile libp2p for Android ARM64
         working-directory: spikes/libp2p-transport
         run: cargo check --target aarch64-linux-android
+
+  host-unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Install Rust 1.91
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.91.0
+      - name: Run transport queue tests
+        working-directory: spikes/libp2p-transport
+        run: cargo test
