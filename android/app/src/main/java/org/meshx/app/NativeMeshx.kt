@@ -29,6 +29,7 @@ internal object NativeMeshx {
     private external fun nativeMlsCreateGroupSnapshot(identity: ByteArray): ByteArray
     private external fun nativeMlsCreateKeyPackageSnapshot(identity: ByteArray): ByteArray
     private external fun nativeMlsExtractKeyPackage(snapshot: ByteArray): ByteArray
+    private external fun nativeMlsAddMemberToGroup(groupSnapshot: ByteArray, keyPackage: ByteArray): ByteArray
     private external fun nativeMlsValidateGroupSnapshot(snapshot: ByteArray): Boolean
     private external fun nativeMlsTwoMemberRoundTripSelfTest(): Boolean
 
@@ -148,6 +149,18 @@ internal object NativeMeshx {
         check(loadError == null) { "Native bridge unavailable: $loadError" }
         return nativeMlsExtractKeyPackage(snapshot).also {
             check(it.isNotEmpty()) { "Native OpenMLS KeyPackage validation returned no public package." }
+        }
+    }
+
+    /** Adds a contact's verified one-use KeyPackage and returns an invitation bundle. */
+    fun addMlsMemberToGroup(groupSnapshot: ByteArray, keyPackage: ByteArray): ByteArray {
+        check(loadError == null) { "Native bridge unavailable: $loadError" }
+        return try {
+            nativeMlsAddMemberToGroup(groupSnapshot, keyPackage).also {
+                check(it.isNotEmpty()) { "Native OpenMLS member invitation returned no bundle." }
+            }
+        } catch (error: UnsatisfiedLinkError) {
+            throw IllegalStateException("Native MLS member invitation unavailable: ${error.message ?: "unknown JNI error"}", error)
         }
     }
 
