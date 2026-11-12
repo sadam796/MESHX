@@ -129,7 +129,7 @@ jobs:
       - name: Verify exported JNI entry point
         run: |
           NDK_BIN="$ANDROID_HOME/ndk/28.0.13004108/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          "$NDK_BIN/llvm-nm" -D android/app/src/main/jniLibs/arm64-v8a/libmeshx_android_ffi.so | grep -E 'Java_org_meshx_app_NativeMeshx_native(TransportStatus|GenerateIdentity|TransportPublicKey|TransportPeerId|StartTransport|AddBootstrapPeers|FindPeer|MlsCreateSignerSnapshot|MlsValidateSignerSnapshot)'
+          "$NDK_BIN/llvm-nm" -D android/app/src/main/jniLibs/arm64-v8a/libmeshx_android_ffi.so | grep -E 'Java_org_meshx_app_NativeMeshx_native(TransportStatus|GenerateIdentity|TransportPublicKey|TransportPeerId|StartTransport|AddBootstrapPeers|FindPeer|SendCiphertext|PollIncomingCiphertexts|MlsCreateSignerSnapshot|MlsValidateSignerSnapshot)'
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
