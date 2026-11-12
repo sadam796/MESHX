@@ -1,0 +1,17 @@
+services:
+  meshx-relay:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: meshx-relay:local
+    restart: unless-stopped
+    environment:
+      MESHX_RELAY_KEY_FILE: /data/relay-identity.key
+      MESHX_RELAY_LISTEN: /ip4/0.0.0.0/tcp/4001
+    ports:
+      - "4001:4001/tcp"
+    volumes:
+      - meshx-relay-data:/data
+
+volumes:
+  meshx-relay-data:
