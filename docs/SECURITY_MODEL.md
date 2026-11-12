@@ -18,7 +18,7 @@ MESHX is an early Android prototype. The app can create a device identity, creat
 - The current local message format and UI are prototype-only. No message is transmitted to a contact or relay.
 - The experimental relay mailbox request protocol authenticates each connection with libp2p Noise and binds Store to the connected sender Peer ID. Fetch is scoped to the authenticated peer, and acknowledgement can remove only a message addressed to that peer. This is transport-level authorization, not proof that the envelope payload is encrypted or MLS-authenticated.
 - Mailbox files contain routing metadata plus the opaque payload. The relay cannot decrypt a properly encrypted payload, but sender/recipient identifiers, message timing, and ciphertext size remain visible. Unix mailbox directories/files use restrictive 0700/0600 permissions; global capacity limits exist, but per-peer quotas, rate limiting, and public abuse controls do not.
-- The mailbox protocol is not yet connected to the Android app, and no Android-to-server offline delivery has been verified.
+- The Android native transport now has an experimental mailbox client that stores, fetches, and acknowledges relay envelopes. It has not yet been verified against a running public server or on two physical Android devices.
 - Losing or resetting the device may make the local encryption key unavailable. Recovery and encrypted backup are not implemented.
 
 ## Required one-to-one end-to-end design
