@@ -8,6 +8,7 @@ services:
     environment:
       MESHX_RELAY_KEY_FILE: /data/relay-identity.key
       MESHX_RELAY_LISTEN: /ip4/0.0.0.0/tcp/4001
+      MESHX_RELAY_PUBLIC_ADDRESS: ${MESHX_RELAY_PUBLIC_ADDRESS:-}
     ports:
       - "4001:4001/tcp"
     volumes:
