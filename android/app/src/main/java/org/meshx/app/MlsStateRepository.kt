@@ -45,6 +45,35 @@ internal class MlsStateRepository(context: Context) {
         }
     }
 
+    /**
+     * Joins a contact invitation using a previously saved KeyPackage private state.
+     * The one-use KeyPackage vault record is deleted only after the joined group
+     * has been safely persisted.
+     */
+    fun joinAndSaveInvitedGroup(
+        keyPackageRecordId: String,
+        groupRecordId: String,
+        welcomeMessage: ByteArray,
+        ratchetTree: ByteArray
+    ) {
+        val keyPackageState = vault.load(keyPackageRecordId)
+            ?: throw IllegalStateException("Saved one-use MLS KeyPackage state was not found.")
+        var joinedGroupSnapshot: ByteArray? = null
+        try {
+            joinedGroupSnapshot = NativeMeshx.joinMlsGroupFromWelcome(
+                keyPackageState, welcomeMessage, ratchetTree
+            )
+            vault.save(groupRecordId, joinedGroupSnapshot)
+            check(NativeMeshx.validateMlsGroupSnapshot(joinedGroupSnapshot)) {
+                "Joined MLS group failed restore validation."
+            }
+            vault.delete(keyPackageRecordId)
+        } finally {
+            keyPackageState.fill(0)
+            joinedGroupSnapshot?.fill(0)
+        }
+    }
+
     /** Creates an RFC 9420 group and immediately encrypts its state at rest. */
     fun createAndSaveGroupState(recordId: String, credentialIdentity: ByteArray) {
         val snapshot = NativeMeshx.createMlsGroupSnapshot(credentialIdentity)
