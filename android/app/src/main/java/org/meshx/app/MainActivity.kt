@@ -386,7 +386,8 @@ private fun MeshxHome() {
                                         updated.map { encryptLocalRecord(it) }.toSet()
                                     ).commit()) { "Received message could not be saved securely." }
                                     localMessages = updated
-                                    mlsChatStatus = "New encrypted message received, authenticated, and saved."
+                                    NativeMeshx.ackIncomingCiphertext(item.getString("message_id"))
+                                    mlsChatStatus = "New encrypted message received, authenticated, saved, and acknowledged."
                                 } finally {
                                     plaintext.fill(0)
                                 }
