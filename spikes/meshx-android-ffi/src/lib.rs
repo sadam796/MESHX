@@ -386,7 +386,7 @@ fn start_swarm(identity_bytes: &[u8]) -> Result<String, String> {
                                                 &peers,
                                             );
                                             let bootstrap_result = meshx_libp2p_transport_spike::start_dht_bootstrap(
-                                                &mut swarm.behaviour_mut().kad,
+                                                &mut swarm.behaviour_mut().meshx.kad,
                                             );
                                             match bootstrap_result {
                                                 Ok(query_id) => set_status(format!(
