@@ -20,7 +20,12 @@ fn relay_server(key: identity::Keypair) -> Swarm<relay::Behaviour> {
         .expect("relay server TCP transport")
         .with_quic()
         .with_behaviour(|key| {
-            relay::Behaviour::new(key.public().to_peer_id(), relay::Config::default())
+            let mut behaviour =
+                relay::Behaviour::new(key.public().to_peer_id(), relay::Config::default());
+            // Loopback tests have no externally confirmed address, so explicitly
+            // enable HOP protocol advertisement for this test relay.
+            behaviour.set_status(Some(relay::Status::Enable));
+            behaviour
         })
         .expect("relay server behaviour")
         .build()
