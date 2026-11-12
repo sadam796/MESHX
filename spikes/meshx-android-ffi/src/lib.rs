@@ -1,6 +1,6 @@
-//! Android JNI bridge for a libp2p TCP/Noise/Yamux peer and opaque ciphertext
-//! request/response delivery. MLS encryption, durable relays, and global delivery
-//! are separate unfinished milestones.
+//! Android JNI bridge for libp2p peer delivery and the experimental durable
+//! relay mailbox protocol. MLS ciphertext remains opaque to the relay; public
+//! deployment and real-device end-to-end verification are separate milestones.
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -927,7 +927,7 @@ pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeAckIncomingCiphertex
         }
     }
     let relay_peer = match mailbox_sources().lock() {
-        Ok(sources) => sources.get(&message_id).copied(),
+        Ok(sources) => sources.get(&message_id).cloned(),
         Err(_) => return JNI_FALSE,
     };
     if let Some(relay_peer) = relay_peer {
