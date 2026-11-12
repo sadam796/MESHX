@@ -1,9 +1,9 @@
 package org.meshx.app
 
 /**
- * JNI boundary for the native libp2p transport and bounded opaque-ciphertext
- * request/response API. Ciphertext send/receive is not yet connected to the chat
- * UI or MLS group encryption, and delivery is direct-peer/volatile only.
+ * JNI boundary for the native libp2p transport, direct ciphertext delivery,
+ * and the experimental durable relay mailbox client. The relay mailbox requires
+ * a live compatible server and is not a proof of recipient delivery.
  */
 internal object NativeMeshx {
     private val loadError: String? = try {
@@ -80,9 +80,9 @@ internal object NativeMeshx {
     }
 
     /**
-     * Sends opaque MLS/application ciphertext to a peer over a direct path or a
-     * confirmed circuit-relay route. This does not encrypt plaintext or provide
-     * offline delivery.
+     * Sends opaque MLS/application ciphertext directly and also requests durable
+     * storage from each configured, connected mailbox relay. This does not
+     * encrypt plaintext or mean the recipient has received the message.
      */
     fun sendCiphertext(peerId: String, ciphertext: ByteArray): String = loadError?.let {
         "MESHX send error: Native bridge unavailable: $it"
