@@ -25,6 +25,7 @@ internal object NativeMeshx {
     private external fun nativeAckIncomingCiphertext(messageId: String): Boolean
     private external fun nativeStartTransport(identity: ByteArray): String
     private external fun nativeAddBootstrapPeers(addresses: String): String
+    private external fun nativeAddRelayPeer(address: String): String
     private external fun nativeMlsCreateSignerSnapshot(): ByteArray
     private external fun nativeMlsValidateSignerSnapshot(snapshot: ByteArray): Boolean
     private external fun nativeMlsCreateGroupSnapshot(identity: ByteArray): ByteArray
@@ -112,6 +113,14 @@ internal object NativeMeshx {
         nativeStartTransport(identity)
     } catch (error: UnsatisfiedLinkError) {
         "Native bridge method unavailable: ${error.message ?: "unknown JNI error"}"
+    }
+
+    fun addRelayPeer(address: String): String = loadError?.let {
+        "MESHX relay error: Native bridge unavailable: $it"
+    } ?: try {
+        nativeAddRelayPeer(address)
+    } catch (error: UnsatisfiedLinkError) {
+        "MESHX relay error: Native method unavailable: ${error.message ?: "unknown JNI error"}"
     }
 
     fun addBootstrapPeers(addresses: String): String = loadError?.let {
