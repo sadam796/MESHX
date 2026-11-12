@@ -163,6 +163,23 @@ private fun loadLocalMessages(prefs: android.content.SharedPreferences): Set<Str
     return plaintext
 }
 
+private fun loadProcessedIncomingIds(prefs: android.content.SharedPreferences): Set<String> {
+    val stored = prefs.getStringSet("processed_incoming_ids", emptySet())?.toSet() ?: emptySet()
+    val processed = linkedSetOf<String>()
+    val encrypted = linkedSetOf<String>()
+    stored.forEach { item ->
+        try {
+            val decoded = if (item.startsWith("ENC1:")) decryptLocalRecord(item) else item
+            if (decoded.matches(Regex("[0-9a-fA-F]{32}"))) processed.add(decoded.lowercase())
+            encrypted.add(if (item.startsWith("ENC1:")) item else encryptLocalRecord(item))
+        } catch (_: Exception) {
+            // Ignore corrupt markers; never treat unauthenticated data as processed.
+        }
+    }
+    if (encrypted != stored) prefs.edit().putStringSet("processed_incoming_ids", encrypted).apply()
+    return processed
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -369,10 +386,19 @@ private fun MeshxHome() {
                     if (peerId != null && mlsRepository.restoreAndValidateGroupState(groupRecordId)) {
                         val rawBatch = NativeMeshx.pollIncomingCiphertexts(peerId)
                         val batch = org.json.JSONArray(rawBatch)
+                        val processedIncomingIds = loadProcessedIncomingIds(prefs).toMutableSet()
                         for (index in 0 until batch.length()) {
                             val item = batch.getJSONObject(index)
                             val authenticatedTransportPeer = item.getString("sender_peer_id")
                             if (authenticatedTransportPeer != peerId) continue
+                            val messageId = item.getString("message_id").lowercase()
+                            if (messageId in processedIncomingIds) {
+                                // A previous app interruption may have happened after the
+                                // secure save but before native acknowledgement. Do not advance
+                                // the MLS ratchet twice for the same envelope.
+                                NativeMeshx.ackIncomingCiphertext(messageId)
+                                continue
+                            }
                             val byteArray = item.getJSONArray("ciphertext")
                             val encrypted = ByteArray(byteArray.length()) { byteArray.getInt(it).toByte() }
                             try {
@@ -381,12 +407,14 @@ private fun MeshxHome() {
                                     val encoded = Base64.encodeToString(plaintext, Base64.NO_WRAP)
                                     val entry = "$chatId#${System.currentTimeMillis()}#$encoded"
                                     val updated = localMessages + entry
-                                    check(prefs.edit().putStringSet(
-                                        "local_messages",
-                                        updated.map { encryptLocalRecord(it) }.toSet()
-                                    ).commit()) { "Received message could not be saved securely." }
+                                    val updatedProcessedIds = processedIncomingIds + messageId
+                                    check(prefs.edit()
+                                        .putStringSet("local_messages", updated.map { encryptLocalRecord(it) }.toSet())
+                                        .putStringSet("processed_incoming_ids", updatedProcessedIds.map { encryptLocalRecord(it) }.toSet())
+                                        .commit()) { "Received message and duplicate-protection marker could not be saved securely." }
                                     localMessages = updated
-                                    NativeMeshx.ackIncomingCiphertext(item.getString("message_id"))
+                                    processedIncomingIds.add(messageId)
+                                    NativeMeshx.ackIncomingCiphertext(messageId)
                                     mlsChatStatus = "New encrypted message received, authenticated, saved, and acknowledged."
                                 } finally {
                                     plaintext.fill(0)
