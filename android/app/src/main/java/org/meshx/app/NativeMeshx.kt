@@ -27,6 +27,8 @@ internal object NativeMeshx {
     private external fun nativeMlsCreateSignerSnapshot(): ByteArray
     private external fun nativeMlsValidateSignerSnapshot(snapshot: ByteArray): Boolean
     private external fun nativeMlsCreateGroupSnapshot(identity: ByteArray): ByteArray
+    private external fun nativeMlsCreateKeyPackageSnapshot(identity: ByteArray): ByteArray
+    private external fun nativeMlsExtractKeyPackage(snapshot: ByteArray): ByteArray
     private external fun nativeMlsValidateGroupSnapshot(snapshot: ByteArray): Boolean
     private external fun nativeMlsTwoMemberRoundTripSelfTest(): Boolean
 
@@ -131,6 +133,23 @@ internal object NativeMeshx {
         }
     }
 
+
+
+    /** Creates a signed one-use MLS KeyPackage; persist the private snapshot in the Keystore vault. */
+    fun createMlsKeyPackageSnapshot(identity: ByteArray): ByteArray {
+        check(loadError == null) { "Native bridge unavailable: $loadError" }
+        return nativeMlsCreateKeyPackageSnapshot(identity).also {
+            check(it.isNotEmpty()) { "Native OpenMLS KeyPackage generation returned an empty snapshot." }
+        }
+    }
+
+    /** Restores private KeyPackage material and validates its public signature before export. */
+    fun extractMlsKeyPackage(snapshot: ByteArray): ByteArray {
+        check(loadError == null) { "Native bridge unavailable: $loadError" }
+        return nativeMlsExtractKeyPackage(snapshot).also {
+            check(it.isNotEmpty()) { "Native OpenMLS KeyPackage validation returned no public package." }
+        }
+    }
 
     /** Creates a real RFC 9420 group snapshot for encrypted vault persistence. */
     fun createMlsGroupSnapshot(identity: ByteArray): ByteArray {
