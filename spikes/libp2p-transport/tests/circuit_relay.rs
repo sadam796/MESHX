@@ -9,7 +9,19 @@ use libp2p::{
     tcp, yamux, SwarmBuilder,
 };
 
-fn relay_server(key: identity::Keypair) -> Swarm<relay::Behaviour> {
+#[derive(libp2p::swarm::NetworkBehaviour)]
+struct TestRelayServerBehaviour {
+    relay: relay::Behaviour,
+    ping: libp2p::ping::Behaviour,
+}
+
+#[derive(libp2p::swarm::NetworkBehaviour)]
+struct TestRelayClientBehaviour {
+    relay: relay::client::Behaviour,
+    ping: libp2p::ping::Behaviour,
+}
+
+fn relay_server(key: identity::Keypair) -> Swarm<TestRelayServerBehaviour> {
     SwarmBuilder::with_existing_identity(key)
         .with_tokio()
         .with_tcp(
@@ -20,18 +32,21 @@ fn relay_server(key: identity::Keypair) -> Swarm<relay::Behaviour> {
         .expect("relay server TCP transport")
         .with_quic()
         .with_behaviour(|key| {
-            let mut behaviour =
+            let mut relay =
                 relay::Behaviour::new(key.public().to_peer_id(), relay::Config::default());
             // Loopback tests have no externally confirmed address, so explicitly
             // enable HOP protocol advertisement for this test relay.
-            behaviour.set_status(Some(relay::Status::Enable));
-            behaviour
+            relay.set_status(Some(relay::Status::Enable));
+            TestRelayServerBehaviour {
+                relay,
+                ping: libp2p::ping::Behaviour::new(libp2p::ping::Config::new()),
+            }
         })
         .expect("relay server behaviour")
         .build()
 }
 
-fn relay_client(key: identity::Keypair) -> Swarm<relay::client::Behaviour> {
+fn relay_client(key: identity::Keypair) -> Swarm<TestRelayClientBehaviour> {
     SwarmBuilder::with_existing_identity(key)
         .with_tokio()
         .with_tcp(
@@ -43,7 +58,10 @@ fn relay_client(key: identity::Keypair) -> Swarm<relay::client::Behaviour> {
         .with_quic()
         .with_relay_client(noise::Config::new, yamux::Config::default)
         .expect("relay client transport")
-        .with_behaviour(|_key, relay| relay)
+        .with_behaviour(|_key, relay| TestRelayClientBehaviour {
+            relay,
+            ping: libp2p::ping::Behaviour::new(libp2p::ping::Config::new()),
+        })
         .expect("relay client behaviour")
         .build()
 }
