@@ -69,7 +69,17 @@ A planned feature is not implemented until it has working tests on the intended 
 - Do not ship real-user messaging until the threat model and security review are complete.
 
 
-## Task #47 — nearby delivery acknowledgement
+## Task #47 — Apple / iPhone OpenMLS compatibility
+- [x] Add a macOS CI workflow for the physical iPhone ARM64 Rust target.
+- [x] Add Apple Silicon iOS Simulator ARM64 compile validation.
+- [x] Run the shared two-member MLS, replay, tamper, and SQLite persistence tests on macOS.
+- [ ] Verify the iOS device and simulator CI jobs pass on the corrected workflow.
+- [ ] Build a native Swift/SwiftUI iOS app wrapper around the shared Rust MLS core.
+- [ ] Implement iOS Keychain-backed encryption and persistent MLS state storage.
+- [ ] Run the MLS tests inside an iOS simulator app.
+- [ ] Exchange authenticated MLS application messages between the Android app and iPhone app on real devices.
+
+## Task #48 — nearby delivery acknowledgement
 - [x] Add a random 128-bit message ID to each nearby encrypted message frame.
 - [x] Require a matching receiver acknowledgement before showing nearby send as delivered.
 - [x] Persist authenticated plaintext and processed message ID before sending the acknowledgement.
