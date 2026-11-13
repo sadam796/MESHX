@@ -55,10 +55,7 @@ class WifiDirectCiphertextTransportInstrumentedTest {
     fun acknowledgementMustMatchMessageId() {
         val id = "0123456789abcdef0123456789abcdef"
         val output = ByteArrayOutputStream()
-        val method = WifiDirectCiphertextTransport::class.java
-            .getDeclaredMethod("writeAck", java.io.OutputStream::class.java, String::class.java)
-        method.isAccessible = true
-        method.invoke(WifiDirectCiphertextTransport, output, id)
+        WifiDirectCiphertextTransport.writeAck(output, id)
         WifiDirectCiphertextTransport.readAck(ByteArrayInputStream(output.toByteArray()), id)
         assertThrows(IllegalArgumentException::class.java) {
             WifiDirectCiphertextTransport.readAck(
