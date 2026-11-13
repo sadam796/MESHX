@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -41,7 +40,12 @@ import kotlinx.coroutines.withContext
 
 @SuppressLint("MissingPermission")
 @Composable
-internal fun NearbyWifiDirectPanel() {
+internal fun NearbyWifiDirectPanel(
+    activeChatName: String?,
+    outgoingCiphertextBase64: String,
+    onDecryptCiphertext: suspend (String, ByteArray) -> ByteArray,
+    onAuthenticatedMessage: (String, ByteArray) -> Unit
+) {
     val context = LocalContext.current
     val manager = remember {
         context.getSystemService(Context.WIFI_P2P_SERVICE) as? WifiP2pManager
@@ -62,13 +66,10 @@ internal fun NearbyWifiDirectPanel() {
             context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED
         })
     }
-    var wifiP2pEnabled by remember { mutableStateOf(false) }
     var peers by remember { mutableStateOf(emptyList<WifiP2pDevice>()) }
     var groupFormed by remember { mutableStateOf(false) }
     var isGroupOwner by remember { mutableStateOf(false) }
     var groupOwnerAddress by remember { mutableStateOf("") }
-    var ciphertextBase64 by remember { mutableStateOf("") }
-    var receivedBase64 by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var wifiStatus by remember {
         mutableStateOf("Wi-Fi Direct is optional. Discover and connect to a nearby Android phone.")
@@ -99,8 +100,7 @@ internal fun NearbyWifiDirectPanel() {
                                 WifiP2pManager.EXTRA_WIFI_STATE,
                                 WifiP2pManager.WIFI_P2P_STATE_DISABLED
                             )
-                            wifiP2pEnabled = state == WifiP2pManager.WIFI_P2P_STATE_ENABLED
-                            if (!wifiP2pEnabled) {
+                            if (state != WifiP2pManager.WIFI_P2P_STATE_ENABLED) {
                                 groupFormed = false
                                 groupOwnerAddress = ""
                                 wifiStatus = "Turn on Wi-Fi to use Wi-Fi Direct."
@@ -110,10 +110,10 @@ internal fun NearbyWifiDirectPanel() {
                             if (permissionGranted) {
                                 manager.requestPeers(channel) { list ->
                                     peers = list.deviceList.toList()
-                                    if (peers.isEmpty()) {
-                                        wifiStatus = "No nearby MESHX-capable phone found yet. Keep both screens open and scan again."
+                                    wifiStatus = if (peers.isEmpty()) {
+                                        "No nearby device found yet. Keep both screens open and scan again."
                                     } else {
-                                        wifiStatus = "Found " + peers.size + " nearby device(s). Choose the other phone."
+                                        "Found " + peers.size + " nearby device(s). Choose the other phone."
                                     }
                                 }
                             }
@@ -126,9 +126,9 @@ internal fun NearbyWifiDirectPanel() {
                                     groupOwnerAddress = info.groupOwnerAddress?.hostAddress ?: ""
                                     wifiStatus = if (info.groupFormed) {
                                         if (info.isGroupOwner) {
-                                            "Connected. This phone is the group owner; wait here to receive ciphertext."
+                                            "Connected as group owner. This phone receives; the other phone sends."
                                         } else {
-                                            "Connected. This phone can send ciphertext to the group owner."
+                                            "Connected as client. This phone sends to the group owner."
                                         }
                                     } else {
                                         "Wi-Fi Direct connection is not active."
@@ -160,8 +160,13 @@ internal fun NearbyWifiDirectPanel() {
             Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text("Nearby Wi-Fi Direct", style = MaterialTheme.typography.titleMedium)
-            Text("Connect nearby Android phones without internet. This sends opaque MLS ciphertext only; it does not send plaintext or provide worldwide delivery.")
+            Text("Nearby Wi-Fi Direct · MLS chat", style = MaterialTheme.typography.titleMedium)
+            Text("Nearby-only transfer without internet. Messages are created by the open MLS chat, then authenticated and decrypted before being saved. No plaintext is sent over the socket.")
+            Text(
+                activeChatName?.let { "Active encrypted chat: $it" } ?: "Open an encrypted chat below to use Wi-Fi Direct.",
+                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.bodySmall
+            )
 
             if (manager == null || channel == null) {
                 Text("Wi-Fi Direct is not supported by this device.")
@@ -196,7 +201,7 @@ internal fun NearbyWifiDirectPanel() {
                             wifiStatus = "Requesting Wi-Fi Direct connection to " + peer.deviceName + "…"
                             manager.connect(channel, config, object : WifiP2pManager.ActionListener {
                                 override fun onSuccess() {
-                                    wifiStatus = "Connection request sent. Accept the request on the other phone if Android asks."
+                                    wifiStatus = "Connection request sent. Accept it on the other phone if Android asks."
                                 }
                                 override fun onFailure(reason: Int) {
                                     wifiStatus = "Connection request failed. Android error code: " + reason
@@ -210,34 +215,28 @@ internal fun NearbyWifiDirectPanel() {
 
                 Text(
                     if (groupFormed) {
-                        if (isGroupOwner) "Connected role: group owner" else "Connected role: client"
+                        if (isGroupOwner) "Connected role: group owner (receiver)" else "Connected role: client (sender)"
                     } else {
                         "Status: not connected"
                     },
                     style = MaterialTheme.typography.bodySmall
                 )
 
-                OutlinedTextField(
-                    value = ciphertextBase64,
-                    onValueChange = { ciphertextBase64 = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("MLS ciphertext (Base64)") },
-                    minLines = 2
-                )
-
                 Button(
-                    enabled = groupFormed && !isGroupOwner && !busy && ciphertextBase64.isNotBlank(),
+                    enabled = groupFormed && !isGroupOwner && !busy &&
+                        activeChatName != null && outgoingCiphertextBase64.isNotBlank(),
                     onClick = {
+                        val chatId = activeChatName ?: return@Button
                         scope.launch {
                             busy = true
-                            wifiStatus = "Sending encrypted ciphertext over Wi-Fi Direct…"
+                            wifiStatus = "Sending the active chat's MLS ciphertext…"
                             try {
-                                val bytes = Base64.decode(ciphertextBase64.trim(), Base64.DEFAULT)
+                                val bytes = Base64.decode(outgoingCiphertextBase64.trim(), Base64.DEFAULT)
                                 try {
                                     withContext(Dispatchers.IO) {
                                         WifiDirectCiphertextTransport.connectAndSend(groupOwnerAddress, bytes)
                                     }
-                                    wifiStatus = "Ciphertext sent. The receiving phone must authenticate/decrypt it in the matching MLS group."
+                                    wifiStatus = "Encrypted message sent to the nearby phone. MLS will authenticate it before display."
                                 } finally {
                                     bytes.fill(0)
                                 }
@@ -249,15 +248,16 @@ internal fun NearbyWifiDirectPanel() {
                         }
                     }
                 ) {
-                    Text("Send encrypted ciphertext")
+                    Text("Send current MLS message")
                 }
 
                 Button(
-                    enabled = groupFormed && isGroupOwner && !busy,
+                    enabled = groupFormed && isGroupOwner && !busy && activeChatName != null,
                     onClick = {
+                        val chatId = activeChatName ?: return@Button
                         scope.launch {
                             busy = true
-                            wifiStatus = "Waiting up to 60 seconds for the other phone to send ciphertext…"
+                            wifiStatus = "Waiting up to 60 seconds for an encrypted message…"
                             try {
                                 val received = withContext(Dispatchers.IO) {
                                     val server = WifiDirectCiphertextTransport.openServer(groupOwnerAddress)
@@ -268,35 +268,33 @@ internal fun NearbyWifiDirectPanel() {
                                     }
                                 }
                                 try {
-                                    receivedBase64 = Base64.encodeToString(received, Base64.NO_WRAP)
-                                    wifiStatus = "Ciphertext received. Import it into the matching MLS chat to authenticate and decrypt."
+                                    val plaintext = withContext(Dispatchers.IO) {
+                                        onDecryptCiphertext(chatId, received)
+                                    }
+                                    try {
+                                        onAuthenticatedMessage(chatId, plaintext)
+                                        wifiStatus = "MLS authenticated the nearby message. It was saved in the open chat."
+                                    } finally {
+                                        plaintext.fill(0)
+                                    }
                                 } finally {
                                     received.fill(0)
                                 }
                             } catch (error: Exception) {
-                                wifiStatus = "Wi-Fi Direct receive failed: " + (error.localizedMessage ?: "unknown")
+                                wifiStatus = "Message rejected or Wi-Fi Direct receive failed: " +
+                                    (error.localizedMessage ?: "unknown")
                             } finally {
                                 busy = false
                             }
                         }
                     }
                 ) {
-                    Text("Receive encrypted ciphertext")
-                }
-
-                if (receivedBase64.isNotBlank()) {
-                    OutlinedTextField(
-                        value = receivedBase64,
-                        onValueChange = { receivedBase64 = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Received ciphertext (Base64)") },
-                        minLines = 2
-                    )
+                    Text("Receive + authenticate MLS message")
                 }
             }
 
             Text(wifiStatus, style = MaterialTheme.typography.bodySmall)
-            Text("Keep both phones awake and this screen open. One transfer is handled per receive session. Background delivery, automatic MLS chat integration, and physical two-phone radio testing are not complete.")
+            Text("This prototype uses one direction per Wi-Fi Direct group: client sends, group owner receives. Keep both phones awake and this screen open. For a reply, reconnect with roles reversed. Background delivery, retries, and physical two-phone radio testing are still pending.")
         }
     }
 }
