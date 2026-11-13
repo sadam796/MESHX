@@ -51,6 +51,7 @@ A planned feature is not implemented until it has working tests on the intended 
 - [ ] Complete and physically verify nearby Bluetooth/Wi-Fi Direct transport for devices within radio range.
 - [x] Add a Wi-Fi Direct discovery/connection and ciphertext-only socket UI prototype; Android CI validation and physical-phone radio testing are tracked separately.
 - [x] Connect the nearby Wi-Fi Direct panel to the active MLS chat: send generated MLS ciphertext directly and authenticate/decrypt incoming frames before saving plaintext locally (automated build/test and physical-device verification tracked separately).
+- [x] Add message-ID acknowledgements and duplicate-safe same-session retry for nearby Wi-Fi Direct delivery; receiver persists the authenticated message and processed ID before acknowledging (physical two-phone verification remains pending).
 - [ ] Add opt-in nearby store-and-forward with hop limits, expiry, and duplicate suppression.
 - [ ] Clearly distinguish local radio delivery from worldwide Internet delivery.
 
@@ -66,3 +67,13 @@ A planned feature is not implemented until it has working tests on the intended 
 - Treat all relays and bootstrap services as potentially observable/untrusted.
 - Do not promise guaranteed delivery, anonymity, or uninterrupted operation.
 - Do not ship real-user messaging until the threat model and security review are complete.
+
+
+## Task #47 — nearby delivery acknowledgement
+- [x] Add a random 128-bit message ID to each nearby encrypted message frame.
+- [x] Require a matching receiver acknowledgement before showing nearby send as delivered.
+- [x] Persist authenticated plaintext and processed message ID before sending the acknowledgement.
+- [x] Recognize same-session retries by message ID and acknowledge duplicates without decrypting twice.
+- [x] Add Android instrumentation tests for frame bounds, truncation, ID matching, and acknowledgement validation.
+- [ ] Persist outgoing retry IDs across app restarts and test retries after process death.
+- [ ] Verify delivery acknowledgement and duplicate retry on two physical Android phones.
