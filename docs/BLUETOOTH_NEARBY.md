@@ -10,7 +10,7 @@ cannot connect distant cities. Wi-Fi Direct is tracked separately as task #45.
   must be encrypted/authenticated by the MLS layer before this transport is called.
 - Frames use a 4-byte big-endian length prefix and enforce a 1-byte to 1-MiB payload cap.
 - Socket operations are blocking and must run off the Android main thread, e.g. on Dispatchers.IO.
-- The Bluetooth feature is optional; devices without Bluetooth can still use MESHX.
+- The Bluetooth feature is optional; devices without Bluetooth can still use MESHX. The Compose panel lists already-paired devices and supports a manual one-frame send/receive session; it is not a background service or automatic MLS chat integration.
 - Android 12+ requires runtime BLUETOOTH_CONNECT permission for socket operations.
   Scanning/discovery requires BLUETOOTH_SCAN; advertising/discoverability requires
   BLUETOOTH_ADVERTISE. The current transport primitive does not yet implement the
