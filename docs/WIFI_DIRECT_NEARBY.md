@@ -30,3 +30,20 @@ distant cities; worldwide messaging remains a separate Internet/libp2p path.
 2. Test peer discovery, group formation, and ciphertext transfer on two physical phones.
 3. Verify received ciphertext with the matching MLS group before displaying plaintext.
 4. Test connection loss, timeout, duplicate delivery, and recovery behavior.
+
+
+## Task #46 — MLS chat integration
+
+- The nearby panel is bound to the currently open contact chat.
+- The existing chat composer creates MLS application ciphertext; the nearby client sends
+  those bytes directly without asking the user to copy/paste Base64.
+- The group-owner receiver passes the frame to the matching saved MLS group. Only after
+  MLS authentication and decryption succeeds is plaintext written to the encrypted local
+  message store and shown in chat history.
+- Wrong-group, modified, or replayed ciphertext is rejected by the MLS state machine and
+  is not added to local chat history.
+- Group-state mutations in the app-facing repository are synchronized to avoid concurrent
+  local relay and Wi-Fi Direct receive operations racing over the same saved group snapshot.
+- Current Wi-Fi Direct prototype is one-way per group (client sends, owner receives);
+  reconnect with roles reversed for a reply. Background service, automatic role negotiation,
+  delivery acknowledgements/retries, and two-physical-phone validation remain future work.
