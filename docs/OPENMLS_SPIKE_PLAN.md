@@ -1,67 +1,43 @@
-# MESHX OpenMLS Evaluation Spike
+# MESHX OpenMLS evaluation and Apple compatibility
 
-## Status: plan only — no cryptography dependency added
+## Task #47 — iPhone / iOS compatibility
 
-This is an isolated evaluation plan. It does not change the Android app, current identity keys, local chat, or network behavior.
+This is an isolated compatibility and protocol-validation task. It does not yet make the Android application an iOS application, and it does not claim that an iPhone can message an Android phone in the current app.
 
-## Why test OpenMLS
+### What this task verifies
+- The same pinned OpenMLS Rust crate and MESHX MLS test code compile for physical iPhone ARM64.
+- The same code compiles for Apple Silicon iOS Simulator ARM64.
+- The two-member MLS protocol, ciphertext authentication/decryption, replay rejection, and persistent-state reload tests run on the macOS host.
+- Android and iOS use the same MLS ciphersuite and wire format in this isolated Rust core.
 
-OpenMLS is an implementation of IETF MLS (RFC 9420). The current published crate documentation identifies version 0.9.2. Its CI builds Android and iOS Rust targets, but labels them unsupported/not tested; only Linux, Windows and macOS targets are listed as built and tested. Therefore, a successful cross-compile is only an initial engineering signal, not proof of mobile readiness.
+### CI
+Workflow: `.github/workflows/openmls-ios-spike.yml`
+- macOS host protocol and persistence tests.
+- `aarch64-apple-ios` compile check for physical iPhones.
+- `aarch64-apple-ios-sim` compile check for Apple Silicon simulator.
 
-References:
+The iOS targets require Xcode-provided SDKs. A successful cross-compile is not an iPhone runtime test. Rust's iOS targets are Tier 2 without host tools; tests must ultimately run in an iOS app or simulator. OpenMLS upstream documents iOS as built on CI but unsupported/not tested by its own CI. References:
+- https://doc.rust-lang.org/stable/rustc/platform-support/apple-ios.html
 - https://docs.rs/crate/openmls/latest
 - https://github.com/openmls/openmls
-- https://latest.openmls.tech/book/
 
-## Evaluation sequence
+### Explicitly not complete in #47
+- No Swift/SwiftUI iOS application or Xcode project exists yet.
+- No iOS Keychain-backed OpenMLS storage adapter exists yet.
+- No iPhone runtime/simulator execution has been performed by this workflow.
+- No Android-to-iPhone app-to-app message exchange has been performed.
+- No App Store signing, TestFlight, push notification, or background delivery work is included.
+- The OpenMLS crate remains an isolated spike and is not installed in the production Android app.
 
-### Gate 1 — isolated native build
-- Pin OpenMLS and every crypto-provider dependency to exact versions.
-- Record the full dependency tree, licence notices, checksums and Rust toolchain.
-- Build a tiny Rust library on the host CI runner.
-- Do not add the library to the production Android app.
+### Pass criteria
+The automated part of #47 passes only when all three CI jobs succeed: host MLS tests, physical-device ARM64 compile, and Apple Silicon simulator compile. The full cross-platform product milestone remains open until an iOS app wrapper, Keychain storage, runtime tests, and a real Android–iPhone encrypted message exchange are completed.
 
-### Gate 2 — mobile cross-compilation
-- Build Android arm64 first using a pinned Android NDK and Rust target.
-- Then test Android x86_64 for emulator coverage.
-- Build the iOS arm64 target in a macOS CI runner.
-- Record that cross-compilation is not runtime support or a security audit.
-- Keep generated native binaries out of the Git repository; publish only CI artifacts if needed.
+## OpenMLS implementation constraints
+OpenMLS implements IETF MLS (RFC 9420). It is an encryption/group-key protocol, not peer discovery or transport. It does not itself provide global routing, relay availability, push notifications, or offline delivery.
 
-### Gate 3 — protocol behavior
-Use two independent test identities and test the MLS two-member group flow:
-1. Create credentials and key packages using protocol-defined APIs.
-2. Exchange key packages through a deliberately simple test transport.
-3. Create a group, add the second member, and process the commit.
-4. Exchange encrypted application messages in both directions.
-5. Persist and reload each member's MLS state, then repeat message exchange.
-6. Test malformed messages, replayed messages, stale epochs, duplicate delivery, member removal and identity/key changes.
-
-No hand-written cryptographic primitives or custom session protocol are allowed.
-
-### Gate 4 — MESHX fit
-Before any adoption, design how MESHX will provide:
-- authenticated credentials and human-verifiable contact identity;
-- key-package publication and retrieval over multiple independent relays;
-- offline store-and-forward of opaque protocol messages;
-- replay/duplicate handling, expiry, rate limits and abuse resistance;
-- encrypted media key distribution;
-- backup and recovery without exposing private keys to relays.
-
-MLS is an encryption/group-key protocol, not a peer-discovery or transport network. It does not by itself solve global routing, relay availability, push notifications or offline delivery.
-
-## Explicit non-goals
-
-- Do not replace the existing prototype EC QR identity yet.
-- Do not enable network sending or receiving.
-- Do not describe local AES-GCM storage as end-to-end encryption.
-- Do not add the third-party Dart/Flutter OpenMLS wrapper to this Kotlin/Compose app merely to avoid writing bindings. A framework migration would be a separate product decision and needs its own maintenance, licence and audit review.
-- Do not expose debug features that print cryptographic secrets or protocol key material.
-
-## Pass criteria
-
-The spike passes only if reproducible Android and iOS builds succeed, the two-device protocol tests pass including state reload, the exact dependency and licence set is reviewed, and the design fits MESHX's multi-relay model. Passing this spike still does not authorize production use; independent security review and a migration plan are required.
-
-## Current result
-
-Not started. This document records the next bounded engineering task. No OpenMLS dependency is installed in the MESHX app.
+- Keep OpenMLS and crypto-provider versions pinned.
+- Do not implement custom cryptographic primitives.
+- Do not expose debug features that print secrets or key material.
+- Do not claim local at-rest encryption alone is end-to-end encryption.
+- Do not add a third-party Dart/Flutter wrapper to the Kotlin/Compose app without a separate framework decision and maintenance/security review.
+- Before production adoption, review dependency licences, threat model, storage integration, key backup/recovery, relay fit, and obtain independent security review.
