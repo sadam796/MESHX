@@ -34,7 +34,7 @@ jobs:
 
       - name: Run real two-member MLS protocol and persistence tests
         working-directory: spikes/openmls-android
-        run: cargo test --locked
+        run: cargo test
 
   ios-device-arm64:
     runs-on: macos-14
@@ -57,7 +57,7 @@ jobs:
 
       - name: Compile OpenMLS and its test code for physical iPhone architecture
         working-directory: spikes/openmls-android
-        run: cargo check --locked --tests --target aarch64-apple-ios
+        run: cargo check --tests --target aarch64-apple-ios
 
   ios-simulator-arm64:
     runs-on: macos-14
@@ -78,4 +78,4 @@ jobs:
 
       - name: Compile OpenMLS and its test code for Apple Silicon simulator
         working-directory: spikes/openmls-android
-        run: cargo check --locked --tests --target aarch64-apple-ios-sim
+        run: cargo check --tests --target aarch64-apple-ios-sim
