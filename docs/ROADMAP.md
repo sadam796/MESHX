@@ -75,7 +75,7 @@ A planned feature is not implemented until it has working tests on the intended 
 - [x] Run the shared two-member MLS, replay, tamper, and SQLite persistence tests on macOS.
 - [ ] Verify the iOS device and simulator CI jobs pass on the corrected workflow.
 - [ ] Build a native Swift/SwiftUI iOS app wrapper around the shared Rust MLS core.
-- [ ] Implement iOS Keychain-backed encryption and persistent MLS state storage.
+- [x] Add a Swift Keychain-backed opaque MLS state-store module with save/load/delete and replacement tests (macOS CI; production app wiring still pending).\n- [ ] Wire the Swift Keychain store to the shared OpenMLS Rust core and iOS app lifecycle.
 - [ ] Run the MLS tests inside an iOS simulator app.
 - [ ] Exchange authenticated MLS application messages between the Android app and iPhone app on real devices.
 
