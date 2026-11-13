@@ -26,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,7 +45,8 @@ internal fun NearbyWifiDirectPanel(
     activeChatName: String?,
     outgoingCiphertextBase64: String,
     onDecryptCiphertext: suspend (String, ByteArray) -> ByteArray,
-    onAuthenticatedMessage: (String, ByteArray) -> Unit
+    isMessageAlreadyProcessed: (String) -> Boolean,
+    onAuthenticatedMessage: (String, String, ByteArray) -> Unit
 ) {
     val context = LocalContext.current
     val manager = remember {
@@ -71,8 +73,13 @@ internal fun NearbyWifiDirectPanel(
     var isGroupOwner by remember { mutableStateOf(false) }
     var groupOwnerAddress by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var outgoingMessageId by remember { mutableStateOf("") }
     var wifiStatus by remember {
         mutableStateOf("Wi-Fi Direct is optional. Discover and connect to a nearby Android phone.")
+    }
+
+    LaunchedEffect(activeChatName, outgoingCiphertextBase64) {
+        outgoingMessageId = if (activeChatName != null && outgoingCiphertextBase64.isNotBlank()) WifiDirectCiphertextTransport.newMessageId() else ""
     }
 
     val permissionRequest = rememberLauncherForActivityResult(
@@ -229,19 +236,19 @@ internal fun NearbyWifiDirectPanel(
                         val chatId = activeChatName ?: return@Button
                         scope.launch {
                             busy = true
-                            wifiStatus = "Sending the active chat's MLS ciphertext…"
+                            wifiStatus = "Sending encrypted message and waiting for receiver acknowledgement…"
                             try {
                                 val bytes = Base64.decode(outgoingCiphertextBase64.trim(), Base64.DEFAULT)
                                 try {
                                     withContext(Dispatchers.IO) {
-                                        WifiDirectCiphertextTransport.connectAndSend(groupOwnerAddress, bytes)
+                                        WifiDirectCiphertextTransport.connectAndSend(groupOwnerAddress, outgoingMessageId, bytes)
                                     }
-                                    wifiStatus = "Encrypted message sent to the nearby phone. MLS will authenticate it before display."
+                                    wifiStatus = "Delivered: receiver authenticated and saved this message. Acknowledgement received."
                                 } finally {
                                     bytes.fill(0)
                                 }
                             } catch (error: Exception) {
-                                wifiStatus = "Wi-Fi Direct send failed: " + (error.localizedMessage ?: "unknown")
+                                wifiStatus = "No delivery acknowledgement. Keep this encrypted message and retry: " + (error.localizedMessage ?: "unknown")
                             } finally {
                                 busy = false
                             }
@@ -259,7 +266,7 @@ internal fun NearbyWifiDirectPanel(
                             busy = true
                             wifiStatus = "Waiting up to 60 seconds for an encrypted message…"
                             try {
-                                val received = withContext(Dispatchers.IO) {
+                                val session = withContext(Dispatchers.IO) {
                                     val server = WifiDirectCiphertextTransport.openServer(groupOwnerAddress)
                                     try {
                                         WifiDirectCiphertextTransport.acceptAndReceive(server)
@@ -267,18 +274,23 @@ internal fun NearbyWifiDirectPanel(
                                         server.close()
                                     }
                                 }
-                                try {
-                                    val plaintext = withContext(Dispatchers.IO) {
-                                        onDecryptCiphertext(chatId, received)
+                                session.use {
+                                    if (isMessageAlreadyProcessed(session.messageId)) {
+                                        withContext(Dispatchers.IO) { session.acknowledge() }
+                                        wifiStatus = "Duplicate retry detected. Existing saved message acknowledged without decrypting twice."
+                                    } else {
+                                        val plaintext = withContext(Dispatchers.IO) {
+                                            onDecryptCiphertext(chatId, session.ciphertext)
+                                        }
+                                        try {
+                                            onAuthenticatedMessage(chatId, session.messageId, plaintext)
+                                            withContext(Dispatchers.IO) { session.acknowledge() }
+                                            wifiStatus = "Delivered: MLS authenticated and saved the message; acknowledgement sent."
+                                        } finally {
+                                            plaintext.fill(0)
+                                        }
                                     }
-                                    try {
-                                        onAuthenticatedMessage(chatId, plaintext)
-                                        wifiStatus = "MLS authenticated the nearby message. It was saved in the open chat."
-                                    } finally {
-                                        plaintext.fill(0)
-                                    }
-                                } finally {
-                                    received.fill(0)
+                                    session.ciphertext.fill(0)
                                 }
                             } catch (error: Exception) {
                                 wifiStatus = "Message rejected or Wi-Fi Direct receive failed: " +
@@ -294,7 +306,7 @@ internal fun NearbyWifiDirectPanel(
             }
 
             Text(wifiStatus, style = MaterialTheme.typography.bodySmall)
-            Text("This prototype uses one direction per Wi-Fi Direct group: client sends, group owner receives. Keep both phones awake and this screen open. For a reply, reconnect with roles reversed. Background delivery, retries, and physical two-phone radio testing are still pending.")
+            Text("Each nearby message has a stable 128-bit ID. The sender waits for an acknowledgement sent only after MLS authentication and local save; retrying the same ciphertext reuses its ID and duplicates are acknowledged without decrypting twice. One direction per group: client sends, owner receives. Keep both phones awake and this screen open. Background delivery and physical two-phone radio testing remain pending.")
         }
     }
 }
