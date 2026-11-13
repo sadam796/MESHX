@@ -47,3 +47,21 @@ distant cities; worldwide messaging remains a separate Internet/libp2p path.
 - Current Wi-Fi Direct prototype is one-way per group (client sends, owner receives);
   reconnect with roles reversed for a reply. Background service, automatic role negotiation,
   delivery acknowledgements/retries, and two-physical-phone validation remain future work.
+
+
+## Task #47 — acknowledged nearby delivery and duplicate-safe retry
+
+- Every Wi-Fi Direct message frame now carries a random 128-bit message ID followed by
+  the MLS ciphertext. The ciphertext remains opaque to the transport.
+- The sender waits for an acknowledgement containing the exact same message ID. A send
+  is reported as delivered only after that acknowledgement is received.
+- The receiver writes the authenticated plaintext and encrypted processed-ID marker to
+  local storage in one synchronous preference commit before acknowledging.
+- If an acknowledgement is lost, the sender can retry the same ciphertext while the chat
+  remains open. The stable ID lets the receiver recognize the duplicate and acknowledge
+  it without attempting to decrypt the same MLS ciphertext a second time.
+- Instrumentation coverage checks message framing, ID validation, payload bounds,
+  truncated frames, and matching/mismatching acknowledgements.
+- This is a foreground, one-transfer prototype, not a durable background retry queue.
+  A process restart may generate a new outgoing ID; cross-restart retry persistence and
+  physical two-phone testing are not yet verified.
