@@ -85,7 +85,7 @@ internal object WifiDirectCiphertextTransport {
         return hex(id) to ciphertext
     }
 
-    private fun writeAck(output: OutputStream, messageId: String) {
+    internal fun writeAck(output: OutputStream, messageId: String) {
         val data = DataOutputStream(output)
         data.writeInt(ACK_MAGIC)
         data.write(idBytes(messageId))
