@@ -533,16 +533,22 @@ private fun MeshxHome() {
                         }
                         mlsRepository.decryptAndAdvanceGroupState(groupRecordId, encrypted)
                     },
-                    onAuthenticatedMessage = { chatId, plaintext ->
+                    isMessageAlreadyProcessed = { messageId ->
+                        messageId in loadProcessedIncomingIds(prefs)
+                    },
+                    onAuthenticatedMessage = { chatId, messageId, plaintext ->
+                        val processed = loadProcessedIncomingIds(prefs)
+                        check(messageId !in processed) { "Nearby message was already processed." }
                         val encoded = Base64.encodeToString(plaintext, Base64.NO_WRAP)
                         val entry = "$chatId#${System.currentTimeMillis()}#$encoded"
                         val updated = latestLocalMessages + entry
-                        check(prefs.edit().putStringSet(
-                            "local_messages",
-                            updated.map { encryptLocalRecord(it) }.toSet()
-                        ).commit()) { "Authenticated nearby message could not be saved securely." }
+                        val updatedProcessed = processed + messageId
+                        check(prefs.edit()
+                            .putStringSet("local_messages", updated.map { encryptLocalRecord(it) }.toSet())
+                            .putStringSet("processed_incoming_ids", updatedProcessed.map { encryptLocalRecord(it) }.toSet())
+                            .commit()) { "Authenticated nearby message and duplicate marker could not be saved securely." }
                         localMessages = updated
-                        mlsChatStatus = "Nearby Wi-Fi Direct message authenticated by MLS and saved."
+                        mlsChatStatus = "Nearby Wi-Fi Direct message authenticated, saved, and ready for acknowledgement."
                     }
                 )
                 Text("Android prototype — Internet delivery and end-to-end chat are still in development.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
