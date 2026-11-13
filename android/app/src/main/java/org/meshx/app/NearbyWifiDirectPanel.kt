@@ -87,7 +87,7 @@ internal fun NearbyWifiDirectPanel() {
         }
     }
 
-    DisposableEffect(manager, channel) {
+    DisposableEffect(manager, channel, permissionGranted) {
         if (manager == null || channel == null) {
             onDispose { }
         } else {
@@ -169,8 +169,6 @@ internal fun NearbyWifiDirectPanel() {
                 Button(onClick = {
                     if (!permissionGranted) {
                         permissionRequest.launch(requiredPermissions.toTypedArray())
-                    } else if (!wifiP2pEnabled) {
-                        wifiStatus = "Turn on Wi-Fi in Android settings, then scan again."
                     } else {
                         manager.discoverPeers(channel, object : WifiP2pManager.ActionListener {
                             override fun onSuccess() {
