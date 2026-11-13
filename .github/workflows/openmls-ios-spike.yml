@@ -20,62 +20,42 @@ on:
 permissions:
   contents: read
 
+# Keep the Apple validation in one job. This avoids parallel macOS runner
+# allocation and ensures a single result covers every compatibility check.
+concurrency:
+  group: openmls-ios-compatibility-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  host-mls-protocol-tests:
-    runs-on: macos-14
+  ios-compatibility:
+    runs-on: macos-15
+    timeout-minutes: 45
     steps:
       - name: Check out source
         uses: actions/checkout@v4
 
-      - name: Install pinned Rust toolchain
+      - name: Install Rust toolchain and both Apple targets
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.91.0
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
 
-      - name: Run real two-member MLS protocol and persistence tests
-        working-directory: spikes/openmls-android
-        run: cargo test
-
-  ios-device-arm64:
-    runs-on: macos-14
-    steps:
-      - name: Check out source
-        uses: actions/checkout@v4
-
-      - name: Install Rust and iOS device target
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.91.0
-          targets: aarch64-apple-ios
-
-      - name: Confirm Apple SDK and toolchain
+      - name: Confirm Apple SDKs and toolchain
         run: |
           rustc --version
           cargo --version
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
+          xcrun --sdk iphonesimulator --show-sdk-version
 
-      - name: Compile OpenMLS and its test code for physical iPhone architecture
+      - name: Run shared two-member MLS protocol and persistence tests
+        working-directory: spikes/openmls-android
+        run: cargo test
+
+      - name: Compile OpenMLS and test code for physical iPhone ARM64
         working-directory: spikes/openmls-android
         run: cargo check --tests --target aarch64-apple-ios
 
-  ios-simulator-arm64:
-    runs-on: macos-14
-    steps:
-      - name: Check out source
-        uses: actions/checkout@v4
-
-      - name: Install Rust and Apple Silicon simulator target
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.91.0
-          targets: aarch64-apple-ios-sim
-
-      - name: Confirm simulator SDK
-        run: |
-          xcodebuild -version
-          xcrun --sdk iphonesimulator --show-sdk-version
-
-      - name: Compile OpenMLS and its test code for Apple Silicon simulator
+      - name: Compile OpenMLS and test code for Apple Silicon iOS Simulator
         working-directory: spikes/openmls-android
         run: cargo check --tests --target aarch64-apple-ios-sim
