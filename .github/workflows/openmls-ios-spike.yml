@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "spikes/openmls-android/**"
+      - "ios/MESHXKit/**"
       - ".github/workflows/openmls-ios-spike.yml"
       - "docs/OPENMLS_SPIKE_PLAN.md"
       - "docs/ROADMAP.md"
@@ -12,6 +13,7 @@ on:
     branches: [main]
     paths:
       - "spikes/openmls-android/**"
+      - "ios/MESHXKit/**"
       - ".github/workflows/openmls-ios-spike.yml"
       - "docs/OPENMLS_SPIKE_PLAN.md"
       - "docs/ROADMAP.md"
@@ -47,6 +49,9 @@ jobs:
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
           xcrun --sdk iphonesimulator --show-sdk-version
+
+      - name: Run Swift Keychain state-store tests
+        run: swift test --package-path ios/MESHXKit
 
       - name: Run shared two-member MLS protocol and persistence tests
         working-directory: spikes/openmls-android
