@@ -57,6 +57,7 @@ internal class MlsStateRepository(context: Context) {
      * The one-use KeyPackage vault record is deleted only after the joined group
      * has been safely persisted.
      */
+    @Synchronized
     fun joinAndSaveInvitedGroup(
         keyPackageRecordId: String,
         groupRecordId: String,
@@ -85,6 +86,7 @@ internal class MlsStateRepository(context: Context) {
      * Adds a contact to the saved group, persists the sender's advanced epoch,
      * and returns the Welcome material for secure delivery to that contact.
      */
+    @Synchronized
     fun addContactToGroup(
         groupRecordId: String,
         recipientPublicKeyPackage: ByteArray
@@ -114,6 +116,7 @@ internal class MlsStateRepository(context: Context) {
     }
 
     /** Creates an RFC 9420 group and immediately encrypts its state at rest. */
+    @Synchronized
     fun createAndSaveGroupState(recordId: String, credentialIdentity: ByteArray) {
         val snapshot = NativeMeshx.createMlsGroupSnapshot(credentialIdentity)
         try {
@@ -137,6 +140,7 @@ internal class MlsStateRepository(context: Context) {
      * Encrypts a chat payload with the saved MLS group and persists the advanced
      * sender ratchet before returning opaque ciphertext for transport.
      */
+    @Synchronized
     fun encryptAndAdvanceGroupState(groupRecordId: String, plaintext: ByteArray): ByteArray {
         val state = vault.load(groupRecordId)
             ?: throw IllegalStateException("Saved MLS group state was not found.")
@@ -165,6 +169,7 @@ internal class MlsStateRepository(context: Context) {
      * Authenticates incoming MLS ciphertext and persists the advanced receiver
      * ratchet before returning the decrypted application payload.
      */
+    @Synchronized
     fun decryptAndAdvanceGroupState(groupRecordId: String, ciphertext: ByteArray): ByteArray {
         val state = vault.load(groupRecordId)
             ?: throw IllegalStateException("Saved MLS group state was not found.")
