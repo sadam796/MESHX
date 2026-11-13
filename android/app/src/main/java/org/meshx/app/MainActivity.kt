@@ -382,6 +382,7 @@ private fun MeshxHome() {
     var selectedChat by remember { mutableStateOf<String?>(null) }
     var messageDraft by remember { mutableStateOf("") }
     var localMessages by remember { mutableStateOf(loadLocalMessages(prefs)) }
+    val latestLocalMessages by rememberUpdatedState(localMessages)
     val mlsRepository = remember { MlsStateRepository(context) }
     var mlsChatStatus by remember { mutableStateOf<String?>(null) }
     var mlsKeyPackageText by remember { mutableStateOf("") }
@@ -389,6 +390,10 @@ private fun MeshxHome() {
     var mlsCiphertextText by remember { mutableStateOf("") }
     var mlsIncomingCiphertextText by remember { mutableStateOf("") }
     var mlsBusy by remember { mutableStateOf(false) }
+    LaunchedEffect(selectedChat) {
+        mlsCiphertextText = ""
+        mlsIncomingCiphertextText = ""
+    }
 
     // Poll only the currently open, already-joined contact group. Native polling
     // leaves messages from other contacts in the receive queue.
@@ -516,7 +521,30 @@ private fun MeshxHome() {
                 Text("MESHX", style = MaterialTheme.typography.headlineLarge)
                 Text("Global private messaging")
                 NearbyBluetoothPanel()
-                NearbyWifiDirectPanel()
+                NearbyWifiDirectPanel(
+                    activeChatName = selectedChat,
+                    outgoingCiphertextBase64 = mlsCiphertextText,
+                    onDecryptCiphertext = { chatId, encrypted ->
+                        val currentIdentity = identity ?: loadOrCreateIdentity(prefs)
+                        val groupRecordId = "meshx-chat-" +
+                            listOf(currentIdentity.fingerprint, chatId).sorted().joinToString("-")
+                        check(mlsRepository.restoreAndValidateGroupState(groupRecordId)) {
+                            "This chat has no valid joined MLS group on this device."
+                        }
+                        mlsRepository.decryptAndAdvanceGroupState(groupRecordId, encrypted)
+                    },
+                    onAuthenticatedMessage = { chatId, plaintext ->
+                        val encoded = Base64.encodeToString(plaintext, Base64.NO_WRAP)
+                        val entry = "$chatId#${System.currentTimeMillis()}#$encoded"
+                        val updated = latestLocalMessages + entry
+                        check(prefs.edit().putStringSet(
+                            "local_messages",
+                            updated.map { encryptLocalRecord(it) }.toSet()
+                        ).commit()) { "Authenticated nearby message could not be saved securely." }
+                        localMessages = updated
+                        mlsChatStatus = "Nearby Wi-Fi Direct message authenticated by MLS and saved."
+                    }
+                )
                 Text("Android prototype — Internet delivery and end-to-end chat are still in development.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 Spacer(Modifier.height(24.dp))
                 Text("Your digital identity", style = MaterialTheme.typography.titleLarge)
