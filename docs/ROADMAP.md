@@ -50,6 +50,7 @@ A planned feature is not implemented until it has working tests on the intended 
 - [ ] Add encrypted photo, voice, and video transfer with size limits and resumable chunks.
 - [ ] Complete and physically verify nearby Bluetooth/Wi-Fi Direct transport for devices within radio range.
 - [x] Add a Wi-Fi Direct discovery/connection and ciphertext-only socket UI prototype; Android CI validation and physical-phone radio testing are tracked separately.
+- [x] Connect the nearby Wi-Fi Direct panel to the active MLS chat: send generated MLS ciphertext directly and authenticate/decrypt incoming frames before saving plaintext locally (automated build/test and physical-device verification tracked separately).
 - [ ] Add opt-in nearby store-and-forward with hop limits, expiry, and duplicate suppression.
 - [ ] Clearly distinguish local radio delivery from worldwide Internet delivery.
 
