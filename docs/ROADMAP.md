@@ -48,7 +48,8 @@ A planned feature is not implemented until it has working tests on the intended 
 
 ## Stage 4 — media and nearby offline mode
 - [ ] Add encrypted photo, voice, and video transfer with size limits and resumable chunks.
-- [ ] Add nearby Bluetooth/Wi-Fi Direct transport for devices within radio range.
+- [ ] Complete and physically verify nearby Bluetooth/Wi-Fi Direct transport for devices within radio range.
+- [x] Add a Wi-Fi Direct discovery/connection and ciphertext-only socket UI prototype; Android CI validation and physical-phone radio testing are tracked separately.
 - [ ] Add opt-in nearby store-and-forward with hop limits, expiry, and duplicate suppression.
 - [ ] Clearly distinguish local radio delivery from worldwide Internet delivery.
 
