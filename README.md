@@ -19,7 +19,7 @@ Implemented in code and covered by automated checks:
 
 ## Not yet verified or complete
 
-- KeyPackage and Welcome setup still use manual copy/paste; automatic Internet exchange is not implemented.
+- The app has send/receive controls for signed KeyPackage and Welcome envelopes through native direct ciphertext and the experimental relay mailbox; manual copy/paste remains a fallback. Public-relay and cross-network delivery are not yet verified.
 - Public bootstrap reachability, public relay deployment, Android-to-public-relay exchange, and successful delivery between phones on different networks have not been verified.
 - Real two-phone Bluetooth and Wi-Fi Direct testing remains pending.
 - Durable authenticated Internet delivery receipts/retries, encrypted media transfer, recovery phrase, encrypted backup, and iPhone app remain incomplete.
