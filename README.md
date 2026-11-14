@@ -2,59 +2,55 @@
 
 **Global-first, private messaging for Android.**
 
-MESHX is an early-stage project exploring decentralized messaging over the Internet, with nearby offline delivery as an additional capability.
+MESHX is an experimental decentralized-messaging project. Worldwide Internet messaging is the primary goal; Bluetooth and Wi-Fi Direct are complementary nearby transports.
 
-## Current project status
+## Current Android prototype
 
-The Android prototype currently supports:
-- Device-local EC contact identity plus a separate libp2p Ed25519 transport identity.
-- The libp2p transport private key is encrypted with an Android Keystore AES-GCM key; Android emulator CI verifies that the same Peer ID survives app force-stop and relaunch.
-- Android emulator CI verifies the native TCP/Noise/Yamux listener starts without an app crash.
-- User-configurable, bounded bootstrap multiaddresses are wired through Kotlin/JNI to outbound dial requests and Kademlia bootstrap initiation. This is configuration and startup wiring, not proof that a public bootstrap node is reachable.
-- Signed MESHX2 QR binding the Android Keystore EC identity to the libp2p Ed25519 transport public key; import verifies the signature and derived Peer ID, and Android emulator CI rejects a tampered binding. Legacy MESHX1 import remains available without a transport-key binding.
-- A local-only chat prototype; messages do not reach another device.
-- Local prototype chat records encrypted at rest using an Android Keystore AES-GCM key.
-- An isolated OpenMLS evaluation with passing tests for two-member message encryption, ciphertext tampering, replay rejection, and non-member rejection.
-- An isolated SQLite persistence test showing MLS group state can be reopened after simulated process restart on host CI.
-- An isolated libp2p localhost test for two authenticated peers over TCP/Noise/Yamux, subject to CI verification.
-- A bounded in-memory queue and a disk-backed ciphertext mailbox queue prototype with expiry, replay markers, capacity limits, and acknowledgement-before-delete tests.
-- A self-hostable libp2p circuit-relay v2 server binary with persistent relay identity, explicit HOP protocol enablement, configurable public address advertisement, and a Docker Compose deployment recipe (`docs/RELAY_DEPLOYMENT.md`).
-- An experimental network mailbox protocol (`/meshx/mailbox/1`) integrated into the relay server: sender-authenticated store, recipient-scoped fetch, recipient-only acknowledgement, bounded batches, disk persistence, expiry, replay markers, and restrictive Unix file permissions.
-- Android UI/JNI wiring for the relay client and experimental mailbox client: configured relay connections, periodic mailbox fetch, encrypted-envelope store requests, and recipient acknowledgements after Android's encrypted local save flow.
+Implemented in code and covered by automated checks:
 
-The OpenMLS/SQLite spike remains isolated from the Android app. The Android native transport now calls the experimental relay mailbox protocol when a compatible relay is configured. A public relay has not been deployed and an Android-to-server mailbox exchange has not yet been verified on a running Android device. The mailbox protocol has loopback network tests, but public cross-network offline delivery is not yet verified.
+- Device-local EC identity protected by Android Keystore, plus a separate libp2p Ed25519 transport identity encrypted with an Android Keystore AES-GCM key.
+- Signed MESHX2 QR identity binding the EC identity to its libp2p transport public key and Peer ID. Legacy MESHX1 import remains available for compatibility.
+- OpenMLS through a Rust JNI bridge: create a group, create a one-use KeyPackage, add a member, join from Welcome, and encrypt/decrypt application messages.
+- MLS state snapshots stored through an Android Keystore AES-GCM vault.
+- Signed `MESHXK1:` KeyPackage and `MESHXI1:` Welcome/ratchet-tree envelopes. The MESHX2 identity key signs the exact setup bytes; the receiver checks the saved contact fingerprint and signed transport binding before accepting them. MLS setup requires the user to mark the contact as fingerprint-verified after an independent comparison.
+- Android instrumentation coverage for two-repository MLS exchange, signed setup-envelope verification, tamper rejection, contact mismatch rejection, and rejection of legacy MESHX1 for signed MLS setup.
+- Native libp2p TCP/Noise/Yamux startup, configurable bootstrap peers, direct ciphertext send, and an experimental relay mailbox client.
+- Nearby Wi-Fi Direct and Bluetooth ciphertext transport prototypes.
 
-**Not implemented or not yet verified:** identity-change warnings and transport-key rotation confirmation, successful discovery through a reachable public bootstrap node, deployment of a public relay, successful Android-to-public-relay mailbox exchange, real cross-network offline message delivery, production end-to-end encrypted chats, encrypted media, Bluetooth/Wi-Fi Direct delivery, recovery phrase, encrypted backup, and iPhone app.
+## Not yet verified or complete
+
+- KeyPackage and Welcome setup still use manual copy/paste; automatic Internet exchange is not implemented.
+- Public bootstrap reachability, public relay deployment, Android-to-public-relay exchange, and successful delivery between phones on different networks have not been verified.
+- Real two-phone Bluetooth and Wi-Fi Direct testing remains pending.
+- Durable authenticated Internet delivery receipts/retries, encrypted media transfer, recovery phrase, encrypted backup, and iPhone app remain incomplete.
+- The project has not received an independent security review and is not ready for sensitive or production communications.
+
+A passing emulator or CI test is not proof of real-world cross-network delivery or physical-radio operation. Relays and bootstrap nodes may observe routing metadata such as peer identifiers, timing, and ciphertext size. Delivery is best-effort, not guaranteed.
 
 ## Product principles
 
+- No phone-number or email registration.
 - Worldwide Internet messaging is the primary goal; users do not need to be physically nearby.
 - Avoid dependence on one mandatory central operator. Discovery and relay services should be replaceable and independently operated where practical.
-- Use end-to-end encryption with established, reviewed cryptographic protocols and libraries.
-- Relay devices and nodes should forward ciphertext, not read message contents.
-- Nearby Bluetooth/Wi-Fi Direct delivery is a complementary feature for devices in radio range; it does not by itself connect distant cities or countries.
-- No guaranteed delivery: connectivity, routing peers, recipient availability, Android background limits, and network restrictions affect delivery.
+- Use established cryptographic protocols and libraries; do not invent cryptography.
+- Relays should forward ciphertext, never message plaintext or decryption keys.
+- Nearby Bluetooth/Wi-Fi Direct delivery is only for devices within radio range.
 - Never put message contents, media, private keys, or recovery phrases on-chain.
-
-## Recovery
-
-The planned recovery approach is a user-held 12- or 24-word recovery phrase, with optional encrypted backup. The phrase and private keys must never be uploaded in plaintext or stored by a relay.
 
 ## Repository map
 
-- `android/` — Android application scaffold and local prototype.
-- `spikes/openmls-android/` — isolated OpenMLS protocol and persistence evaluation; not wired into the app.
+- `android/` — Android application.
+- `spikes/meshx-android-ffi/` — Rust JNI bridge, libp2p transport, and OpenMLS operations.
+- `spikes/openmls-android/` — OpenMLS storage and protocol evaluation tests.
 - `spikes/libp2p-transport/` — libp2p peer-connectivity, relay server, and experimental durable mailbox protocol.
-- `docs/ARCHITECTURE.md` — architecture and security boundaries.
 - `docs/ROADMAP.md` — staged implementation plan.
 - `docs/SECURITY_MODEL.md` — current protections, limitations, and release gates.
-- `docs/IDENTITY_FORMAT.md` — MESHX1 legacy and signed MESHX2 QR format.
-- `docs/TRANSPORT_DECISION.md` — Rust libp2p global transport evaluation and test gates.
-- `docs/RELAY_DEPLOYMENT.md` — experimental self-hosted relay deployment guide.
-- `.github/workflows/` — cloud Android and Rust spike checks.
+- `docs/IDENTITY_FORMAT.md` — MESHX1/MESHX2 identities and signed MLS setup envelopes.
+- `docs/RELAY_DEPLOYMENT.md` — experimental relay deployment guide.
+- `.github/workflows/` — Android and Rust CI checks.
 
 ## Build
 
-A GitHub Actions workflow builds a debug APK in the cloud. Open the **Actions** tab, select **Android debug build**, and run it manually, or push a commit to `main`. The APK is published as a workflow artifact when the build succeeds.
+GitHub Actions builds a debug APK and runs Android emulator instrumentation tests. Open the **Actions** tab and select **Android debug build**. The APK is uploaded as a workflow artifact when the run succeeds.
 
-This project is experimental and is not ready for real private communications or production use.
+MESHX is experimental and is not production-ready.
