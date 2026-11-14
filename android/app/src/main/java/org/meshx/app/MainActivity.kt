@@ -991,7 +991,7 @@ private fun MeshxHome() {
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.fillMaxWidth().padding(16.dp)) {
                             Text("Chat with $chatId", style = MaterialTheme.typography.titleMedium)
-                            Text("MLS ciphertext direct peer ko bheja jata hai. Configured relay connected ho to app encrypted message ko offline mailbox mein bhi save karne ki request bhejti hai aur har 15 second baad pending messages check karti hai. Offline delivery tabhi kaam karegi jab compatible public relay server live ho.", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+                            Text("MLS ciphertext aur signed setup envelopes direct peer ko bheje ja sakte hain. Configured relay connected ho to app mailbox storage ki request karti hai; receiver ka open chat har 1.5 second baad pending inbox check karta hai. Auto setup receive ke liye contact chat open rakhein. Public offline delivery tabhi chalegi jab compatible relay server live aur reachable ho; manual copy/paste fallback bhi available hai.", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
                             val ownIdentity = identity ?: runCatching { loadOrCreateIdentity(prefs).also { identity = it } }.getOrNull()
                             val groupRecordId = ownIdentity?.let { "meshx-chat-" + listOf(it.fingerprint, chatId).sorted().joinToString("-") }
                             val keyPackageRecordId = ownIdentity?.let { "meshx-keypackage-" + it.fingerprint + "-" + chatId }
