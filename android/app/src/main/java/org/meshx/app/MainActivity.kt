@@ -26,6 +26,8 @@ import com.google.zxing.MultiFormatReader
 import com.google.zxing.RGBLuminanceSource
 import com.google.zxing.common.HybridBinarizer
 import com.google.zxing.qrcode.QRCodeWriter
+import java.io.ByteArrayOutputStream
+import java.io.DataOutputStream
 import java.security.KeyFactory
 import java.security.KeyPairGenerator
 import java.security.KeyStore
@@ -307,6 +309,198 @@ internal fun loadOrCreateIdentity(prefs: android.content.SharedPreferences): Mes
         "MESHX2:" + Base64.encodeToString(payload.toByteArray(Charsets.UTF_8), Base64.NO_WRAP),
         transportPeerId
     )
+}
+
+
+private const val MLS_KEY_PACKAGE_ENVELOPE_PREFIX = "MESHXK1:"
+private const val MLS_INVITATION_ENVELOPE_PREFIX = "MESHXI1:"
+private const val MLS_KEY_PACKAGE_DOMAIN = "MESHX-MLS-KEYPACKAGE-V1"
+private const val MLS_INVITATION_DOMAIN = "MESHX-MLS-INVITATION-V1"
+private const val MAX_MLS_ENVELOPE_PART_BYTES = 1024 * 1024
+
+internal fun loadIdentitySigningPrivateKey(): PrivateKey {
+    val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+    return keyStore.getKey(IDENTITY_ALIAS, null) as? PrivateKey
+        ?: throw IllegalStateException("MESHX identity signing key is unavailable in Android Keystore.")
+}
+
+private fun meshxIdentityPublicKey(identityPayload: String): java.security.PublicKey {
+    require(identityPayload.length <= 16_384) { "MESHX identity payload is too large." }
+    val parsed = parsePublicIdentity(identityPayload)
+    require(parsed.authenticatedBinding) { "MLS exchange requires a signed MESHX2 identity." }
+    val payloadBytes = Base64.decode(identityPayload.removePrefix("MESHX2:"), Base64.DEFAULT)
+    val payload = JSONObject(String(payloadBytes, Charsets.UTF_8))
+    val encoded = Base64.decode(payload.getString("identity_public_key"), Base64.DEFAULT)
+    return KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(encoded))
+}
+
+private fun mlsEnvelopeSignatureInput(
+    domain: String,
+    identityPublicKey: ByteArray,
+    parts: List<ByteArray>
+): ByteArray {
+    val output = ByteArrayOutputStream()
+    DataOutputStream(output).use { data ->
+        fun writeField(value: ByteArray) {
+            data.writeInt(value.size)
+            data.write(value)
+        }
+        writeField(domain.toByteArray(Charsets.UTF_8))
+        writeField(identityPublicKey)
+        parts.forEach(::writeField)
+    }
+    return output.toByteArray()
+}
+
+private fun signMlsEnvelope(
+    identityPayload: String,
+    domain: String,
+    parts: List<ByteArray>,
+    signingKey: PrivateKey
+): ByteArray {
+    val publicKey = meshxIdentityPublicKey(identityPayload)
+    val signer = Signature.getInstance("SHA256withECDSA")
+    signer.initSign(signingKey)
+    signer.update(mlsEnvelopeSignatureInput(domain, publicKey.encoded, parts))
+    return signer.sign()
+}
+
+private fun verifyMlsEnvelopeSignature(
+    identityPayload: String,
+    expectedIdentity: ParsedPublicIdentity,
+    domain: String,
+    parts: List<ByteArray>,
+    encodedSignature: String
+) {
+    require(expectedIdentity.authenticatedBinding && expectedIdentity.transportPeerId != null) {
+        "MLS exchange requires a saved, signed MESHX2 contact."
+    }
+    val incomingIdentity = parsePublicIdentity(identityPayload)
+    require(incomingIdentity.authenticatedBinding &&
+        incomingIdentity.fingerprint == expectedIdentity.fingerprint &&
+        incomingIdentity.transportPeerId == expectedIdentity.transportPeerId
+    ) {
+        "MLS envelope identity does not match this saved contact and transport key."
+    }
+    val publicKey = meshxIdentityPublicKey(identityPayload)
+    val signatureBytes = Base64.decode(encodedSignature, Base64.DEFAULT)
+    require(signatureBytes.isNotEmpty() && signatureBytes.size <= 256) {
+        "MLS identity signature has an invalid size."
+    }
+    val verifier = Signature.getInstance("SHA256withECDSA")
+    verifier.initVerify(publicKey)
+    verifier.update(mlsEnvelopeSignatureInput(domain, publicKey.encoded, parts))
+    require(verifier.verify(signatureBytes)) {
+        "MLS envelope signature is invalid. Do not accept this invitation."
+    }
+}
+
+internal fun findSignedMlsContactIdentity(
+    contactPayloads: Set<String>,
+    expectedFingerprint: String
+): ParsedPublicIdentity {
+    val matching = contactPayloads.mapNotNull { raw ->
+        try {
+            parsePublicIdentity(raw).takeIf { it.fingerprint == expectedFingerprint }
+        } catch (_: Exception) {
+            null
+        }
+    }
+    return matching.firstOrNull { it.authenticatedBinding && it.transportPeerId != null }
+        ?: throw IllegalArgumentException(
+            "MLS exchange ke liye saved signed MESHX2 contact zaroori hai. MESHX1 legacy contact supported nahi."
+        )
+}
+
+internal fun createSignedMlsKeyPackageEnvelope(
+    identityPayload: String,
+    keyPackage: ByteArray,
+    signingKey: PrivateKey
+): String {
+    require(keyPackage.isNotEmpty() && keyPackage.size <= MAX_MLS_ENVELOPE_PART_BYTES) {
+        "MLS KeyPackage must be between 1 byte and 1 MiB."
+    }
+    val signature = signMlsEnvelope(
+        identityPayload, MLS_KEY_PACKAGE_DOMAIN, listOf(keyPackage), signingKey
+    )
+    val json = JSONObject()
+        .put("version", 1)
+        .put("identity", identityPayload)
+        .put("key_package", Base64.encodeToString(keyPackage, Base64.NO_WRAP))
+        .put("signature", Base64.encodeToString(signature, Base64.NO_WRAP))
+    return MLS_KEY_PACKAGE_ENVELOPE_PREFIX +
+        Base64.encodeToString(json.toString().toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+}
+
+internal fun verifySignedMlsKeyPackageEnvelope(
+    raw: String,
+    expectedIdentity: ParsedPublicIdentity
+): ByteArray {
+    require(raw.startsWith(MLS_KEY_PACKAGE_ENVELOPE_PREFIX) && raw.length <= 2_000_000) {
+        "Signed MESHX MLS KeyPackage envelope required."
+    }
+    val payload = Base64.decode(raw.removePrefix(MLS_KEY_PACKAGE_ENVELOPE_PREFIX), Base64.DEFAULT)
+    require(payload.size <= 1_500_000) { "MLS KeyPackage envelope is too large." }
+    val json = JSONObject(String(payload, Charsets.UTF_8))
+    require(json.getInt("version") == 1) { "Unsupported MLS KeyPackage envelope version." }
+    val identityPayload = json.getString("identity")
+    val keyPackage = Base64.decode(json.getString("key_package"), Base64.DEFAULT)
+    require(keyPackage.isNotEmpty() && keyPackage.size <= MAX_MLS_ENVELOPE_PART_BYTES) {
+        "MLS KeyPackage must be between 1 byte and 1 MiB."
+    }
+    verifyMlsEnvelopeSignature(
+        identityPayload, expectedIdentity, MLS_KEY_PACKAGE_DOMAIN,
+        listOf(keyPackage), json.getString("signature")
+    )
+    return keyPackage
+}
+
+internal fun createSignedMlsInvitationEnvelope(
+    identityPayload: String,
+    invitation: MlsInvitation,
+    signingKey: PrivateKey
+): String {
+    require(invitation.welcomeMessage.isNotEmpty() &&
+        invitation.welcomeMessage.size <= MAX_MLS_ENVELOPE_PART_BYTES &&
+        invitation.ratchetTree.isNotEmpty() &&
+        invitation.ratchetTree.size <= MAX_MLS_ENVELOPE_PART_BYTES
+    ) { "MLS Welcome and ratchet tree must each be between 1 byte and 1 MiB." }
+    val signature = signMlsEnvelope(
+        identityPayload, MLS_INVITATION_DOMAIN,
+        listOf(invitation.welcomeMessage, invitation.ratchetTree), signingKey
+    )
+    val json = JSONObject()
+        .put("version", 1)
+        .put("identity", identityPayload)
+        .put("welcome", Base64.encodeToString(invitation.welcomeMessage, Base64.NO_WRAP))
+        .put("tree", Base64.encodeToString(invitation.ratchetTree, Base64.NO_WRAP))
+        .put("signature", Base64.encodeToString(signature, Base64.NO_WRAP))
+    return MLS_INVITATION_ENVELOPE_PREFIX +
+        Base64.encodeToString(json.toString().toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+}
+
+internal fun verifySignedMlsInvitationEnvelope(
+    raw: String,
+    expectedIdentity: ParsedPublicIdentity
+): MlsInvitation {
+    require(raw.startsWith(MLS_INVITATION_ENVELOPE_PREFIX) && raw.length <= 4_000_000) {
+        "Signed MESHX MLS invitation envelope required."
+    }
+    val payload = Base64.decode(raw.removePrefix(MLS_INVITATION_ENVELOPE_PREFIX), Base64.DEFAULT)
+    require(payload.size <= 3_000_000) { "MLS invitation envelope is too large." }
+    val json = JSONObject(String(payload, Charsets.UTF_8))
+    require(json.getInt("version") == 1) { "Unsupported MLS invitation envelope version." }
+    val identityPayload = json.getString("identity")
+    val welcome = Base64.decode(json.getString("welcome"), Base64.DEFAULT)
+    val tree = Base64.decode(json.getString("tree"), Base64.DEFAULT)
+    require(welcome.isNotEmpty() && welcome.size <= MAX_MLS_ENVELOPE_PART_BYTES &&
+        tree.isNotEmpty() && tree.size <= MAX_MLS_ENVELOPE_PART_BYTES
+    ) { "MLS Welcome or ratchet tree has an invalid size." }
+    verifyMlsEnvelopeSignature(
+        identityPayload, expectedIdentity, MLS_INVITATION_DOMAIN,
+        listOf(welcome, tree), json.getString("signature")
+    )
+    return MlsInvitation(welcome, tree)
 }
 
 private fun makeQrBitmap(payload: String): android.graphics.Bitmap {
@@ -703,50 +897,70 @@ private fun MeshxHome() {
                             val groupRecordId = ownIdentity?.let { "meshx-chat-" + listOf(it.fingerprint, chatId).sorted().joinToString("-") }
                             val keyPackageRecordId = ownIdentity?.let { "meshx-keypackage-" + it.fingerprint + "-" + chatId }
                             mlsChatStatus?.let { Text(it, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall) }
-                            Text("1. Recipient: create one-time KeyPackage", style = MaterialTheme.typography.titleSmall)
+                            Text("1. Recipient: create a signed one-time KeyPackage", style = MaterialTheme.typography.titleSmall)
+                            Text("MLS setup ke liye dono taraf signed MESHX2 identity aur independently compared fingerprint zaroori hai.", style = MaterialTheme.typography.bodySmall)
                             Button(enabled = !mlsBusy && ownIdentity != null && keyPackageRecordId != null, onClick = {
                                 mlsBusy = true
                                 try {
+                                    require(chatId in verifiedContacts) { "Pehle contact ka fingerprint trusted channel par compare karke 'I compared fingerprint' dabayein." }
+                                    findSignedMlsContactIdentity(contactPublicKeys, chatId)
                                     val bytes = mlsRepository.createAndSaveKeyPackage(keyPackageRecordId!!, ownIdentity!!.fingerprint.toByteArray(Charsets.UTF_8))
-                                    mlsKeyPackageText = Base64.encodeToString(bytes, Base64.NO_WRAP)
-                                    bytes.fill(0)
-                                    mlsChatStatus = "KeyPackage ready. Is public code ko inviter ko share karein."
+                                    try {
+                                        mlsKeyPackageText = createSignedMlsKeyPackageEnvelope(
+                                            ownIdentity!!.qrPayload, bytes, loadIdentitySigningPrivateKey()
+                                        )
+                                    } finally { bytes.fill(0) }
+                                    mlsChatStatus = "Signed KeyPackage ready. Is MESHXK1 code ko contact ko share karein."
                                 } catch (e: Exception) { mlsChatStatus = "KeyPackage error: ${e.localizedMessage ?: "unknown"}" }
                                 finally { mlsBusy = false }
-                            }) { Text("Create my KeyPackage") }
-                            OutlinedTextField(value = mlsKeyPackageText, onValueChange = { mlsKeyPackageText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Public KeyPackage") }, minLines = 2)
-                            Text("2. Inviter: create group and invitation", style = MaterialTheme.typography.titleSmall)
+                            }) { Text("Create signed KeyPackage") }
+                            OutlinedTextField(value = mlsKeyPackageText, onValueChange = { mlsKeyPackageText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Signed MESHXK1 KeyPackage") }, minLines = 2)
+                            Text("2. Inviter: verify KeyPackage and sign Welcome invitation", style = MaterialTheme.typography.titleSmall)
                             Button(enabled = !mlsBusy && ownIdentity != null && groupRecordId != null && mlsKeyPackageText.isNotBlank(), onClick = {
                                 mlsBusy = true
                                 try {
-                                    if (!mlsRepository.restoreAndValidateGroupState(groupRecordId!!)) {
-                                        mlsRepository.createAndSaveGroupState(groupRecordId, ownIdentity!!.fingerprint.toByteArray(Charsets.UTF_8))
-                                    }
-                                    val invite = mlsRepository.addContactToGroup(groupRecordId, Base64.decode(mlsKeyPackageText.trim(), Base64.DEFAULT))
-                                    val bundle = JSONObject().put("version", 1)
-                                        .put("welcome", Base64.encodeToString(invite.welcomeMessage, Base64.NO_WRAP))
-                                        .put("tree", Base64.encodeToString(invite.ratchetTree, Base64.NO_WRAP))
-                                    mlsInvitationText = Base64.encodeToString(bundle.toString().toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
-                                    invite.welcomeMessage.fill(0); invite.ratchetTree.fill(0)
-                                    mlsChatStatus = "Invitation created. Recipient ko code share karein."
+                                    require(chatId in verifiedContacts) { "Pehle contact ka fingerprint trusted channel par compare karein." }
+                                    val expectedContact = findSignedMlsContactIdentity(contactPublicKeys, chatId)
+                                    val publicKeyPackage = verifySignedMlsKeyPackageEnvelope(mlsKeyPackageText.trim(), expectedContact)
+                                    try {
+                                        if (!mlsRepository.restoreAndValidateGroupState(groupRecordId!!)) {
+                                            mlsRepository.createAndSaveGroupState(groupRecordId, ownIdentity!!.fingerprint.toByteArray(Charsets.UTF_8))
+                                        }
+                                        val invite = mlsRepository.addContactToGroup(groupRecordId, publicKeyPackage)
+                                        try {
+                                            mlsInvitationText = createSignedMlsInvitationEnvelope(
+                                                ownIdentity!!.qrPayload, invite, loadIdentitySigningPrivateKey()
+                                            )
+                                        } finally {
+                                            invite.welcomeMessage.fill(0)
+                                            invite.ratchetTree.fill(0)
+                                        }
+                                    } finally { publicKeyPackage.fill(0) }
+                                    mlsChatStatus = "Signed Welcome ready. MESHXI1 invitation contact ko share karein."
                                 } catch (e: Exception) { mlsChatStatus = "Invitation error: ${e.localizedMessage ?: "unknown"}" }
                                 finally { mlsBusy = false }
-                            }) { Text("Create encrypted invitation") }
-                            OutlinedTextField(value = mlsInvitationText, onValueChange = { mlsInvitationText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Welcome invitation code") }, minLines = 2)
-                            Text("3. Recipient: paste invitation and join", style = MaterialTheme.typography.titleSmall)
+                            }) { Text("Verify and create signed invitation") }
+                            OutlinedTextField(value = mlsInvitationText, onValueChange = { mlsInvitationText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Signed MESHXI1 Welcome invitation") }, minLines = 2)
+                            Text("3. Recipient: verify inviter identity and join", style = MaterialTheme.typography.titleSmall)
                             Button(enabled = !mlsBusy && ownIdentity != null && groupRecordId != null && keyPackageRecordId != null && mlsInvitationText.isNotBlank(), onClick = {
                                 mlsBusy = true
                                 try {
-                                    val bundle = JSONObject(String(Base64.decode(mlsInvitationText.trim(), Base64.DEFAULT), Charsets.UTF_8))
-                                    require(bundle.getInt("version") == 1) { "Unsupported invitation version." }
-                                    val welcome = Base64.decode(bundle.getString("welcome"), Base64.DEFAULT)
-                                    val tree = Base64.decode(bundle.getString("tree"), Base64.DEFAULT)
-                                    try { mlsRepository.joinAndSaveInvitedGroup(keyPackageRecordId!!, groupRecordId!!, welcome, tree) }
-                                    finally { welcome.fill(0); tree.fill(0) }
-                                    mlsChatStatus = "MLS group join successful."
+                                    require(chatId in verifiedContacts) { "Pehle inviter ka fingerprint trusted channel par compare karein." }
+                                    val expectedContact = findSignedMlsContactIdentity(contactPublicKeys, chatId)
+                                    val invitation = verifySignedMlsInvitationEnvelope(mlsInvitationText.trim(), expectedContact)
+                                    try {
+                                        mlsRepository.joinAndSaveInvitedGroup(
+                                            keyPackageRecordId!!, groupRecordId!!,
+                                            invitation.welcomeMessage, invitation.ratchetTree
+                                        )
+                                    } finally {
+                                        invitation.welcomeMessage.fill(0)
+                                        invitation.ratchetTree.fill(0)
+                                    }
+                                    mlsChatStatus = "Signed MLS invitation verified; group join successful."
                                 } catch (e: Exception) { mlsChatStatus = "Group join error: ${e.localizedMessage ?: "unknown"}" }
                                 finally { mlsBusy = false }
-                            }) { Text("Join encrypted chat") }
+                            }) { Text("Verify and join encrypted chat") }
                             Divider()
                             Text("4. Encrypt and exchange messages", style = MaterialTheme.typography.titleSmall)
                             OutlinedTextField(value = messageDraft, onValueChange = { messageDraft = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Message to encrypt") }, minLines = 2)
