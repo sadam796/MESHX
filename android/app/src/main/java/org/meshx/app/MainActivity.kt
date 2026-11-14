@@ -347,7 +347,7 @@ private fun mlsEnvelopeSignatureInput(
         }
         writeField(domain.toByteArray(Charsets.UTF_8))
         writeField(identityPublicKey)
-        parts.forEach(::writeField)
+        parts.forEach { writeField(it) }
     }
     return output.toByteArray()
 }
