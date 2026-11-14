@@ -32,9 +32,10 @@ A planned feature is not implemented until it has working tests on the intended 
 - [ ] Verify live peer discovery/bootstrap connections against reachable, replaceable nodes and test successful peer discovery across different networks.
 - [x] Verify the Rust-to-Kotlin JNI startup bridge on Android ARM64 and x86_64 emulator CI; APK packaging, app launch, native listener startup, and restart identity check pass.
 - [x] Wire bounded user-configurable bootstrap multiaddresses through the Android UI/JNI to outbound dial requests and Kademlia bootstrap initiation (live peer reachability is not yet verified).
-- [ ] Integrate the reviewed MLS/session layer into the Android app.
+- [x] Wire experimental OpenMLS group creation, one-use KeyPackage, Welcome join, message encryption/decryption, and Keystore-backed snapshots into the Android app (not production-reviewed).
 - [ ] Verify native libp2p Swarm startup on a physical ARM64 Android device. Current code starts a TCP/Noise/Yamux listener; it does not yet discover peers or send app messages.
-- [ ] Bind MESHX2 contact identities to MLS protocol credentials and authenticate identity changes in the messaging session.
+- [x] Sign exact serialized MLS KeyPackage and Welcome/ratchet-tree setup envelopes with the MESHX2 Android Keystore identity key; require matching saved signed contact identity and manual fingerprint verification (Android instrumentation tests).
+- [ ] Complete in-session MLS credential binding and identity-change handling, and automatically exchange signed setup envelopes over authenticated Internet transport.
 - [ ] Add authenticated delivery receipts, bounded retry, and durable message status.
 - [ ] Test between two phones on different networks, not only on the same Wi-Fi (deferred until code-side readiness).
 - [ ] Document what bootstrap, STUN, or relay infrastructure can observe.
