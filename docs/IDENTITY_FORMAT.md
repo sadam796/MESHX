@@ -25,7 +25,7 @@ The Android prototype uses two additional, versioned manual-exchange formats:
 - `MESHXK1:` wraps a serialized one-use OpenMLS KeyPackage, the sender's signed MESHX2 public identity, and an ECDSA/SHA-256 signature made by that identity's Android Keystore private key.
 - `MESHXI1:` wraps the MLS Welcome message and ratchet tree, the inviter's signed MESHX2 public identity, and an ECDSA/SHA-256 signature.
 
-The signature input uses a distinct domain separator for each envelope type and length-prefixed fields containing the identity public key and exact serialized MLS bytes. The receiver verifies the MESHX2 transport binding, requires the envelope fingerprint and Peer ID to match the saved contact, and verifies the identity signature before passing the KeyPackage or Welcome to OpenMLS. MLS setup also requires the user to mark the contact as fingerprint-verified after an independent trusted-channel comparison. Legacy MESHX1 contacts cannot be used for this signed MLS exchange.
+The signature input uses a distinct domain separator for each envelope type and length-prefixed fields containing the identity public key and exact serialized MLS bytes. The receiver verifies the MESHX2 transport binding, requires the exact identity public key, fingerprint, and Peer ID to match the saved contact, and verifies the identity signature before passing the KeyPackage or Welcome to OpenMLS. MLS setup also requires the user to mark the contact as fingerprint-verified after an independent trusted-channel comparison. Legacy MESHX1 contacts cannot be used for this signed MLS exchange.
 
 The envelopes contain public setup material only. MLS private KeyPackage state remains in the Android Keystore-backed encrypted vault. Each binary envelope part is limited to 1 MiB.
 
