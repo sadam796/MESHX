@@ -39,6 +39,12 @@ class MlsIdentityBindingInstrumentedTest {
         assertRejected {
             verifySignedMlsKeyPackageEnvelope(envelope, expected.copy(fingerprint = "0000-0000-0000-0000"))
         }
+        val alteredIdentityKey = expected.identityPublicKey!!.copyOf()
+        alteredIdentityKey[alteredIdentityKey.lastIndex] =
+            (alteredIdentityKey.last().toInt() xor 1).toByte()
+        assertRejected {
+            verifySignedMlsKeyPackageEnvelope(envelope, expected.copy(identityPublicKey = alteredIdentityKey))
+        }
 
         val json = JSONObject(String(
             Base64.decode(envelope.removePrefix("MESHXK1:"), Base64.DEFAULT),
