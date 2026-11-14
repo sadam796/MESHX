@@ -611,6 +611,9 @@ private fun MeshxHome() {
     var messageDraft by remember { mutableStateOf("") }
     var localMessages by remember { mutableStateOf(loadLocalMessages(prefs)) }
     val latestLocalMessages by rememberUpdatedState(localMessages)
+    val latestContactPublicKeys by rememberUpdatedState(contactPublicKeys)
+    val latestContactTransportPeers by rememberUpdatedState(contactTransportPeers)
+    val latestVerifiedContacts by rememberUpdatedState(verifiedContacts)
     val mlsRepository = remember { MlsStateRepository(context) }
     var mlsChatStatus by remember { mutableStateOf<String?>(null) }
     var mlsKeyPackageText by remember { mutableStateOf("") }
@@ -628,8 +631,8 @@ private fun MeshxHome() {
             runCatching { loadPendingMlsSetupEnvelope(prefs, "invitation", chatId) }.getOrDefault("")
     }
 
-    // Poll only the currently open, already-joined contact group. Native polling
-    // leaves messages from other contacts in the receive queue.
+    // Poll the currently open contact for signed MLS setup envelopes and chat
+    // ciphertext. Ordinary messages stay queued until the MLS group is joined.
     LaunchedEffect(nativeTransportReady, selectedChat) {
         val chatId = selectedChat
         if (nativeTransportReady && chatId != null) {
@@ -637,7 +640,7 @@ private fun MeshxHome() {
                 delay(1500)
                 try {
                     val currentIdentity = identity ?: loadOrCreateIdentity(prefs).also { identity = it }
-                    val peerId = contactTransportPeers.firstOrNull { it.startsWith("$chatId#") }
+                    val peerId = latestContactTransportPeers.firstOrNull { it.startsWith("$chatId#") }
                         ?.substringAfter("#")
                     val groupRecordId = "meshx-chat-" +
                         listOf(currentIdentity.fingerprint, chatId).sorted().joinToString("-")
@@ -676,10 +679,10 @@ private fun MeshxHome() {
                             try {
                                 val setupText = String(encrypted, Charsets.UTF_8)
                                 if (setupText.startsWith("MESHXK1:") || setupText.startsWith("MESHXI1:")) {
-                                    require(chatId in verifiedContacts) {
+                                    require(chatId in latestVerifiedContacts) {
                                         "Contact fingerprint verify karein; signed MLS setup abhi accept nahi kiya gaya."
                                     }
-                                    val expectedContact = findSignedMlsContactIdentity(contactPublicKeys, chatId)
+                                    val expectedContact = findSignedMlsContactIdentity(latestContactPublicKeys, chatId)
                                     if (setupText.startsWith("MESHXK1:")) {
                                         val publicPackage = verifySignedMlsKeyPackageEnvelope(setupText, expectedContact)
                                         publicPackage.fill(0)
@@ -735,7 +738,7 @@ private fun MeshxHome() {
                                 try {
                                     val encoded = Base64.encodeToString(plaintext, Base64.NO_WRAP)
                                     val entry = "$chatId#${System.currentTimeMillis()}#$encoded"
-                                    val updated = localMessages + entry
+                                    val updated = latestLocalMessages + entry
                                     val updatedProcessedIds = processedIncomingIds + messageId
                                     check(prefs.edit()
                                         .putStringSet("local_messages", updated.map { encryptLocalRecord(it) }.toSet())
