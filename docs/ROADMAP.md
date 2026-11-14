@@ -35,7 +35,8 @@ A planned feature is not implemented until it has working tests on the intended 
 - [x] Wire experimental OpenMLS group creation, one-use KeyPackage, Welcome join, message encryption/decryption, and Keystore-backed snapshots into the Android app (not production-reviewed).
 - [ ] Verify native libp2p Swarm startup on a physical ARM64 Android device. Current code starts a TCP/Noise/Yamux listener; it does not yet discover peers or send app messages.
 - [x] Sign exact serialized MLS KeyPackage and Welcome/ratchet-tree setup envelopes with the MESHX2 Android Keystore identity key; require matching saved signed contact identity and manual fingerprint verification (Android instrumentation tests).
-- [ ] Complete in-session MLS credential binding and identity-change handling, and automatically exchange signed setup envelopes over authenticated Internet transport.
+- [x] Add optional send/receive for signed MLS KeyPackage and Welcome envelopes over the native direct/experimental relay-mailbox path; manual fallback remains, and public cross-network delivery is unverified.
+- [ ] Verify setup exchange between two devices on separate networks/public relay, then complete in-session MLS credential binding and identity-change handling.
 - [ ] Add authenticated delivery receipts, bounded retry, and durable message status.
 - [ ] Test between two phones on different networks, not only on the same Wi-Fi (deferred until code-side readiness).
 - [ ] Document what bootstrap, STUN, or relay infrastructure can observe.
