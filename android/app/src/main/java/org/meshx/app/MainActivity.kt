@@ -215,7 +215,8 @@ internal data class MeshxIdentity(
 internal data class ParsedPublicIdentity(
     val fingerprint: String,
     val transportPeerId: String?,
-    val authenticatedBinding: Boolean
+    val authenticatedBinding: Boolean,
+    val identityPublicKey: ByteArray? = null
 )
 
 internal enum class ContactImportDecision { ADD, SAME_IDENTITY, UPGRADE_LEGACY, TRANSPORT_KEY_CHANGED, SIGNED_BINDING_DOWNGRADE }
@@ -251,7 +252,7 @@ internal fun parsePublicIdentity(raw: String): ParsedPublicIdentity {
     if (raw.startsWith("MESHX1:")) {
         val keyBytes = Base64.decode(raw.removePrefix("MESHX1:"), Base64.DEFAULT)
         KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(keyBytes))
-        return ParsedPublicIdentity(fingerprint(keyBytes), null, false)
+        return ParsedPublicIdentity(fingerprint(keyBytes), null, false, keyBytes)
     }
 
     val payloadBytes = Base64.decode(raw.removePrefix("MESHX2:"), Base64.DEFAULT)
@@ -273,7 +274,7 @@ internal fun parsePublicIdentity(raw: String): ParsedPublicIdentity {
     require(actualPeerId == expectedPeerId) {
         "MESHX2 transport Peer ID does not match its public key."
     }
-    return ParsedPublicIdentity(fingerprint(identityPublicKey), actualPeerId, true)
+    return ParsedPublicIdentity(fingerprint(identityPublicKey), actualPeerId, true, identityPublicKey)
 }
 
 internal fun loadOrCreateIdentity(prefs: android.content.SharedPreferences): MeshxIdentity {
@@ -361,8 +362,16 @@ private fun signMlsEnvelope(
     val publicKey = meshxIdentityPublicKey(identityPayload)
     val signer = Signature.getInstance("SHA256withECDSA")
     signer.initSign(signingKey)
-    signer.update(mlsEnvelopeSignatureInput(domain, publicKey.encoded, parts))
-    return signer.sign()
+    val signedBytes = mlsEnvelopeSignatureInput(domain, publicKey.encoded, parts)
+    signer.update(signedBytes)
+    val signatureBytes = signer.sign()
+    val verifier = Signature.getInstance("SHA256withECDSA")
+    verifier.initVerify(publicKey)
+    verifier.update(signedBytes)
+    require(verifier.verify(signatureBytes)) {
+        "MESHX identity signing key does not match the supplied signed identity."
+    }
+    return signatureBytes
 }
 
 private fun verifyMlsEnvelopeSignature(
@@ -378,7 +387,8 @@ private fun verifyMlsEnvelopeSignature(
     val incomingIdentity = parsePublicIdentity(identityPayload)
     require(incomingIdentity.authenticatedBinding &&
         incomingIdentity.fingerprint == expectedIdentity.fingerprint &&
-        incomingIdentity.transportPeerId == expectedIdentity.transportPeerId
+        incomingIdentity.transportPeerId == expectedIdentity.transportPeerId &&
+        expectedIdentity.identityPublicKey?.contentEquals(incomingIdentity.identityPublicKey ?: byteArrayOf()) == true
     ) {
         "MLS envelope identity does not match this saved contact and transport key."
     }
