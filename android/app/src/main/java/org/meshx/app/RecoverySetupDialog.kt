@@ -83,7 +83,7 @@ internal fun RecoverySetupDialog(
             ) {
                 when (mode) {
                     "choose" -> {
-                        Text("24-word phrase se naya recoverable MESHX account banayein, ya pehle se bana account restore karein.")
+                        Text("Is process se recovery keys wala MESHX account activate hoga. Agar aapka pehle se purana MESHX ID hai, uska fingerprint badal jayega; purane contacts ko naya public ID dobara share karna hoga. Purana account apne aap convert nahi hota.")
                         Button(onClick = {
                             generatedPhrase = Bip39Recovery.generate24(words)
                             phrase = generatedPhrase.joinToString(" ")
@@ -98,7 +98,7 @@ internal fun RecoverySetupDialog(
                         }, modifier = Modifier.fillMaxWidth()) { Text("Restore with 24 words") }
                     }
                     "create" -> {
-                        Text("Apne 24 words paper par likhein. Screenshot, chat ya kisi ko share mat karein.")
+                        Text("Apne 24 words paper par likhein. Screenshot, chat ya kisi ko share mat karein. Ye naya account hoga; purana ID automatically recover nahi hoga.")
                         Text(phrase)
                         Row {
                             Checkbox(checked = backupConfirmed, onCheckedChange = { backupConfirmed = it })
