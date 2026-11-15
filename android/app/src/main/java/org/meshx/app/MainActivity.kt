@@ -291,9 +291,15 @@ internal fun loadOrCreateIdentity(prefs: android.content.SharedPreferences): Mes
     val identityPublicKey: ByteArray
     val identityPrivateKey: PrivateKey
     if (recovery != null) {
-        identityPublicKey = recovery.signingPublicKeySpki
-        identityPrivateKey = KeyFactory.getInstance("EC")
-            .generatePrivate(PKCS8EncodedKeySpec(recovery.signingPrivateKeyPkcs8))
+        identityPublicKey = recovery.signingPublicKeySpki.copyOf()
+        identityPrivateKey = try {
+            KeyFactory.getInstance("EC")
+                .generatePrivate(PKCS8EncodedKeySpec(recovery.signingPrivateKeyPkcs8))
+        } finally {
+            recovery.signingPrivateKeyPkcs8.fill(0)
+            recovery.transportPrivateKey.fill(0)
+            recovery.signingPublicKeySpki.fill(0)
+        }
     } else {
         val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         if (!keyStore.containsAlias(IDENTITY_ALIAS)) {
@@ -340,8 +346,14 @@ private const val MAX_MLS_ENVELOPE_PART_BYTES = 1024 * 1024
 internal fun loadIdentitySigningPrivateKey(): PrivateKey {
     val recovery = RecoveryIdentityVaultHolder.current?.load()
     if (recovery != null) {
-        return KeyFactory.getInstance("EC")
-            .generatePrivate(PKCS8EncodedKeySpec(recovery.signingPrivateKeyPkcs8))
+        return try {
+            KeyFactory.getInstance("EC")
+                .generatePrivate(PKCS8EncodedKeySpec(recovery.signingPrivateKeyPkcs8))
+        } finally {
+            recovery.signingPrivateKeyPkcs8.fill(0)
+            recovery.transportPrivateKey.fill(0)
+            recovery.signingPublicKeySpki.fill(0)
+        }
     }
     val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
     return keyStore.getKey(IDENTITY_ALIAS, null) as? PrivateKey
