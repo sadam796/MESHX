@@ -587,6 +587,7 @@ private fun MeshxHome() {
     val prefs = remember { context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE) }
     val recoveryVault = remember { RecoveryIdentityVault(context).also { RecoveryIdentityVaultHolder.current = it } }
     var showRecoverySetup by remember { mutableStateOf(false) }
+    var recoveryEntryMode by remember { mutableStateOf("choose") }
     var nativeTransportStatus by remember { mutableStateOf("Preparing secure MESHX identity…") }
     var nativeTransportReady by remember { mutableStateOf(false) }
     var relayAddress by remember { mutableStateOf(prefs.getString("relay_address", "") ?: "") }
@@ -858,7 +859,7 @@ private fun MeshxHome() {
                         Text("Your recovery phrase stays on this device. Never share it with anyone.", style = MaterialTheme.typography.bodySmall)
                     }
                     if (showRecoverySetup) {
-                        RecoverySetupDialog(onDismiss = { showRecoverySetup = false }, onRecoverySaved = {
+                        RecoverySetupDialog(onDismiss = { showRecoverySetup = false }, initialMode = recoveryEntryMode, onRecoverySaved = {
                             try { identity = loadOrCreateIdentity(prefs); error = null }
                             catch (e: Exception) { error = e.localizedMessage ?: "Account activation failed." }
                         })
