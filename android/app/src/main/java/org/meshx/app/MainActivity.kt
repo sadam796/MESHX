@@ -870,7 +870,30 @@ private fun MeshxHome() {
                                 modifier = Modifier.height(220.dp)
                             )
                             Text("Signed MESHX2 identity. Transport Peer ID: ${current.transportPeerId}")
-                            Text("QR mein sirf public keys aur unka signature hai. Private keys kabhi share nahi hoti.")
+                            Text("QR mein public keys aur unka signature hai. Private keys is phone ke Android Keystore mein rehti hain; kabhi share nahi hoti.")
+                            Spacer(Modifier.height(12.dp))
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("MESHX Public Identity", current.qrPayload))
+                                        android.widget.Toast.makeText(context, "Public identity copied", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                ) { Text("Copy Public Identity") }
+                                Button(
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                            type = "text/plain"
+                                            putExtra(android.content.Intent.EXTRA_SUBJECT, "My MESHX public identity")
+                                            putExtra(android.content.Intent.EXTRA_TEXT, current.qrPayload)
+                                        }
+                                        context.startActivity(android.content.Intent.createChooser(shareIntent, "Share MESHX identity"))
+                                    }
+                                ) { Text("Share Identity") }
+                            }
+                            Text("Dusre phone par is code ko Add a contact mein paste karein, ya QR scan karein.", style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
