@@ -38,8 +38,8 @@ jobs:
 
       - name: Build MESHX relay server
         working-directory: spikes/libp2p-transport
-        run: cargo build --locked --release --bin meshx-relay-server
+        run: cargo build --release --bin meshx-relay-server
 
       - name: Run MESHX transport and relay tests
         working-directory: spikes/libp2p-transport
-        run: cargo test --locked -- --nocapture
+        run: cargo test -- --nocapture
