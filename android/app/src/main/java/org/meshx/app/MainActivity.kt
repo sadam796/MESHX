@@ -608,6 +608,7 @@ private fun MeshxHome() {
     var status by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var selectedChat by remember { mutableStateOf<String?>(null) }
+    var showAdvancedChatSetup by remember { mutableStateOf(false) }
     var messageDraft by remember { mutableStateOf("") }
     var localMessages by remember { mutableStateOf(loadLocalMessages(prefs)) }
     val latestLocalMessages by rememberUpdatedState(localMessages)
@@ -943,50 +944,94 @@ private fun MeshxHome() {
                     }
                 }
 
-                Spacer(Modifier.height(16.dp))
-                Text("Saved contacts (" + contacts.size + ")", style = MaterialTheme.typography.titleMedium)
-                if (contacts.isEmpty()) Text("Abhi koi contact nahi hai.")
-                contacts.forEach { contact ->
-                    Card(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(14.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(contact, style = MaterialTheme.typography.bodySmall)
-                                val boundPeerId = contactTransportPeers.firstOrNull { it.startsWith("$contact#") }?.substringAfter("#")
-                                Text(
-                                    if (boundPeerId != null) "Signed transport binding: ${boundPeerId.take(18)}…" else "Legacy identity — transport key not bound",
-                                    color = if (boundPeerId != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-                                    style = MaterialTheme.typography.labelSmall
-                                )
-                                Text(if (contact in verifiedContacts) "Manually fingerprint-verified" else "Not verified", color = if (contact in verifiedContacts) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
-                                TextButton(onClick = {
-                                    val updated = if (contact in verifiedContacts) verifiedContacts - contact else verifiedContacts + contact
-                                    prefs.edit().putStringSet("verified_contacts", updated).apply()
-                                    verifiedContacts = updated
-                                }) { Text(if (contact in verifiedContacts) "Remove verification" else "I compared fingerprint") }
-                                if (boundPeerId != null) {
-                                    TextButton(
-                                        onClick = {
-                                            val result = NativeMeshx.findPeer(boundPeerId)
-                                            status = result
-                                            error = result.takeIf { it.startsWith("MESHX peer discovery error:") }
-                                        },
-                                        enabled = nativeTransportReady
-                                    ) { Text("Search via DHT") }
+                MESHXChatHomeScreen(
+                    contacts = contacts,
+                    localMessages = localMessages,
+                    selectedChat = selectedChat,
+                    verifiedContacts = verifiedContacts,
+                    contactTransportPeers = contactTransportPeers,
+                    messageDraft = messageDraft,
+                    onMessageDraftChange = { messageDraft = it },
+                    canSendMessage = selectedChat?.let { chatId ->
+                        val currentIdentity = identity ?: runCatching { loadOrCreateIdentity(prefs) }.getOrNull()
+                        val groupId = currentIdentity?.let {
+                            "meshx-chat-" + listOf(it.fingerprint, chatId).sorted().joinToString("-")
+                        }
+                        chatId in verifiedContacts &&
+                            groupId != null &&
+                            runCatching { mlsRepository.restoreAndValidateGroupState(groupId) }.getOrDefault(false) &&
+                            nativeTransportReady &&
+                            contactTransportPeers.any { it.startsWith("$chatId#") }
+                    } ?: false,
+                    sendBusy = mlsBusy,
+                    status = mlsChatStatus,
+                    onOpenChat = { contact ->
+                        selectedChat = contact
+                        messageDraft = ""
+                        showAdvancedChatSetup = false
+                    },
+                    onBackToChats = {
+                        selectedChat = null
+                        showAdvancedChatSetup = false
+                    },
+                    onOpenSecureSetup = { showAdvancedChatSetup = true },
+                    onSendMessage = {
+                        val chatId = selectedChat
+                        if (chatId != null && !mlsBusy) {
+                            mlsBusy = true
+                            try {
+                                require(chatId in verifiedContacts) {
+                                    "Pehle contact ka fingerprint trusted channel par verify karein."
                                 }
+                                val currentIdentity = identity ?: loadOrCreateIdentity(prefs).also { identity = it }
+                                val groupId = "meshx-chat-" +
+                                    listOf(currentIdentity.fingerprint, chatId).sorted().joinToString("-")
+                                check(mlsRepository.restoreAndValidateGroupState(groupId)) {
+                                    "Secure MLS group abhi ready nahi hai. Advanced secure setup complete karein."
+                                }
+                                val peerId = contactTransportPeers.firstOrNull { it.startsWith("$chatId#") }
+                                    ?.substringAfter("#")
+                                    ?: throw IllegalStateException("Contact ka signed transport Peer ID missing hai.")
+                                check(nativeTransportReady) { "MESHX Internet transport abhi ready nahi hai." }
+                                val plain = messageDraft.trim().toByteArray(Charsets.UTF_8)
+                                check(plain.isNotEmpty()) { "Message khaali hai." }
+                                val encrypted = try {
+                                    mlsRepository.encryptAndAdvanceGroupState(groupId, plain)
+                                } finally {
+                                    plain.fill(0)
+                                }
+                                try {
+                                    mlsCiphertextText = Base64.encodeToString(encrypted, Base64.NO_WRAP)
+                                    val sendResult = NativeMeshx.sendCiphertext(peerId, encrypted)
+                                    check(!sendResult.contains("error:", ignoreCase = true) &&
+                                        !sendResult.contains("rejected", ignoreCase = true)) {
+                                        sendResult
+                                    }
+                                    val sentText = messageDraft.trim()
+                                    val encoded = Base64.encodeToString(sentText.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+                                    val entry = "$chatId#${System.currentTimeMillis()}#$encoded"
+                                    val updated = localMessages + entry
+                                    check(prefs.edit().putStringSet(
+                                        "local_messages",
+                                        updated.map { encryptLocalRecord(it) }.toSet()
+                                    ).commit()) { "Message local encrypted history mein save nahi hua." }
+                                    localMessages = updated
+                                    messageDraft = ""
+                                    mlsCiphertextText = ""
+                                    mlsChatStatus = sendResult
+                                } finally {
+                                    encrypted.fill(0)
+                                }
+                            } catch (e: Exception) {
+                                mlsChatStatus = "Message send nahi hua: ${e.localizedMessage ?: "unknown error"}"
+                            } finally {
+                                mlsBusy = false
                             }
-                            TextButton(onClick = {
-                                selectedChat = contact
-                                messageDraft = ""
-                            }) { Text("Open chat") }
                         }
                     }
-                }
+                )
 
-                selectedChat?.let { chatId ->
+                if (showAdvancedChatSetup) selectedChat?.let { chatId ->
                     Spacer(Modifier.height(16.dp))
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.fillMaxWidth().padding(16.dp)) {
@@ -1145,7 +1190,8 @@ private fun MeshxHome() {
                                     Text(body, Modifier.padding(10.dp))
                                 }
                             }
-                            TextButton(onClick = { selectedChat = null }) { Text("Close") }
+                            TextButton(onClick = { showAdvancedChatSetup = false }) { Text("Back to chat") }
+                            TextButton(onClick = { selectedChat = null; showAdvancedChatSetup = false }) { Text("Close chat") }
                         }
                     }
                 }
