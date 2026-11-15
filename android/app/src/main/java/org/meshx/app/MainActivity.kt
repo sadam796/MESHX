@@ -1046,6 +1046,24 @@ private fun MeshxHome() {
                         messageDraft = ""
                         showAdvancedChatSetup = false
                     },
+                    onAddPublicIdentity = { raw ->
+                        try {
+                            require(raw.startsWith("MESHX2:")) { "Complete signed MESHX2 public identity paste karein; recovery phrase kabhi nahi." }
+                            val parsed = parsePublicIdentity(raw)
+                            require(identity?.fingerprint != parsed.fingerprint) { "Yeh aapki apni public identity hai." }
+                            when (classifyContactImport(contactPublicKeys, parsed)) {
+                                ContactImportDecision.ADD, ContactImportDecision.UPGRADE_LEGACY -> {
+                                    persistContactIdentity(raw, parsed)
+                                    "Added: " + parsed.fingerprint + ". Fingerprint ko dost se alag trusted channel par verify karein."
+                                }
+                                ContactImportDecision.SAME_IDENTITY -> "Already added: " + parsed.fingerprint
+                                ContactImportDecision.TRANSPORT_KEY_CHANGED -> "SECURITY: Transport key change detected. Existing security confirmation use karein."
+                                ContactImportDecision.SIGNED_BINDING_DOWNGRADE -> "Rejected: signed identity downgrade."
+                            }
+                        } catch (e: Exception) {
+                            "Invalid public identity: " + (e.localizedMessage ?: "please check the key")
+                        }
+                    },
                     onBackToChats = {
                         selectedChat = null
                         showAdvancedChatSetup = false
