@@ -1,0 +1,45 @@
+name: MESHX outbound Internet smoke test
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "spikes/libp2p-transport/**"
+      - ".github/workflows/internet-connectivity-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  outbound-internet-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Verify DNS resolution
+        run: |
+          python3 - <<'PY'
+          import socket
+          for host in ("github.com", "cloudflare.com"):
+              addresses = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+              if not addresses:
+                  raise SystemExit(f"DNS lookup returned no addresses for {host}")
+              print(f"DNS PASS: {host} -> {addresses[0][4][0]}")
+          PY
+
+      - name: Verify outbound HTTPS
+        run: |
+          curl --fail --silent --show-error --location --max-time 20 https://github.com/ -o /dev/null
+          curl --fail --silent --show-error --location --max-time 20 https://www.cloudflare.com/ -o /dev/null
+          echo "Outbound HTTPS PASS"
+
+      - name: Build MESHX relay server
+        working-directory: spikes/libp2p-transport
+        run: cargo build --locked --release --bin meshx-relay-server
+
+      - name: Run MESHX transport and relay tests
+        working-directory: spikes/libp2p-transport
+        run: cargo test --locked -- --nocapture
