@@ -848,6 +848,23 @@ private fun MeshxHome() {
                 Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                if (identity == null) {
+                    Column(Modifier.fillMaxWidth().padding(top = 72.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Text("MESHX", style = MaterialTheme.typography.displaySmall)
+                        Text("Your private identity. Your control.", style = MaterialTheme.typography.titleMedium)
+                        Text("No phone number. No email. Recover your account with your 24-word phrase.", style = MaterialTheme.typography.bodyMedium)
+                        Button(onClick = { showRecoverySetup = true }, modifier = Modifier.fillMaxWidth()) { Text("Create New Account") }
+                        OutlinedButton(onClick = { showRecoverySetup = true }, modifier = Modifier.fillMaxWidth()) { Text("Import Existing Account") }
+                        Text("Your recovery phrase stays on this device. Never share it with anyone.", style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (showRecoverySetup) {
+                        RecoverySetupDialog(onDismiss = { showRecoverySetup = false }, onRecoverySaved = {
+                            try { identity = loadOrCreateIdentity(prefs); error = null }
+                            catch (e: Exception) { error = e.localizedMessage ?: "Account activation failed." }
+                        })
+                    }
+                    error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                } else {
                 Spacer(Modifier.height(24.dp))
                 Text("MESHX", style = MaterialTheme.typography.headlineLarge)
                 Text("Global private messaging")
@@ -1343,6 +1360,7 @@ private fun MeshxHome() {
                 Text("Chat screen MLS ciphertext ko saved contact ke signed Peer ID par bhejti hai. Configured relay par offline mailbox store/fetch/ack protocol bhi connect hai. Public server deployment, background delivery, media transfer aur Bluetooth / Wi-Fi abhi complete ya verify nahi hue hain.")
                 Spacer(Modifier.height(12.dp))
                 Text("Send request queue hona delivery/read receipt nahi hai. Message ciphertext retry field mein rehta hai; incoming messages sirf matching contact ke joined MLS group mein decrypt hote hain. Recovery phrase aur encrypted backup abhi baaki hain.", style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
     }
