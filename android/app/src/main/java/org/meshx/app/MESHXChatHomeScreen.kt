@@ -28,11 +28,14 @@ internal fun MESHXChatHomeScreen(
     sendBusy: Boolean,
     status: String?,
     onOpenChat: (String) -> Unit,
+    onAddPublicIdentity: (String) -> String,
     onBackToChats: () -> Unit,
     onSendMessage: () -> Unit,
     onOpenSecureSetup: () -> Unit
 ) {
     var search by remember { mutableStateOf("") }
+    var publicIdentityInput by remember { mutableStateOf("") }
+    var publicIdentityStatus by remember { mutableStateOf<String?>(null) }
     val navy = Color(0xFF071B35)
     val blue = Color(0xFF1769AA)
     val page = Color(0xFFF4F7FB)
@@ -71,6 +74,27 @@ internal fun MESHXChatHomeScreen(
                 placeholder = { Text("Search contacts") },
                 label = { Text("Search") }
             )
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = publicIdentityInput,
+                onValueChange = { publicIdentityInput = it; publicIdentityStatus = null },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 2,
+                maxLines = 3,
+                shape = RoundedCornerShape(14.dp),
+                label = { Text("Find a friend by public key") },
+                placeholder = { Text("Paste MESHX2 public identity") }
+            )
+            Button(
+                onClick = {
+                    publicIdentityStatus = onAddPublicIdentity(publicIdentityInput.trim())
+                    if (publicIdentityStatus?.startsWith("Added:") == true || publicIdentityStatus?.startsWith("Already added:") == true) publicIdentityInput = ""
+                },
+                enabled = publicIdentityInput.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp)
+            ) { Text("Search and add contact") }
+            publicIdentityStatus?.let { Text(it, color = if (it.startsWith("Added:") || it.startsWith("Already")) Color(0xFF16834A) else Color(0xFFB3261E), style = MaterialTheme.typography.bodySmall) }
             Spacer(Modifier.height(12.dp))
             val filtered = contacts.filter { it.contains(search.trim(), ignoreCase = true) }
             if (filtered.isEmpty()) {
