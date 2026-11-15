@@ -127,8 +127,8 @@ internal fun MESHXChatHomeScreen(
                     Text(selectedChat, color = navy, fontWeight = FontWeight.Bold, maxLines = 1)
                     Text(if (selectedChat in verifiedContacts) "Fingerprint verified" else "Verify fingerprint before trusting", color = if (selectedChat in verifiedContacts) Color(0xFF16834A) else Color(0xFFB36B16), style = MaterialTheme.typography.labelSmall)
                 }
-                Surface(color = Color(0xFFE3F3E9), shape = CircleShape) {
-                    Text("E2E", Modifier.padding(horizontal = 10.dp, vertical = 6.dp), color = Color(0xFF176B3A), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                Surface(color = if (canSendMessage) Color(0xFFE3F3E9) else Color(0xFFFFF3D9), shape = CircleShape) {
+                    Text(if (canSendMessage) "MLS READY" else "SETUP", Modifier.padding(horizontal = 10.dp, vertical = 6.dp), color = if (canSendMessage) Color(0xFF176B3A) else Color(0xFF80520A), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                 }
             }
             Divider(Modifier.padding(vertical = 10.dp))
@@ -154,29 +154,28 @@ internal fun MESHXChatHomeScreen(
                 Surface(color = Color(0xFFFFF3D9), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp)) {
                         Text("Secure chat setup required", color = Color(0xFF80520A), fontWeight = FontWeight.SemiBold)
-                        Text("MLS group join aur contact ka fingerprint verification complete karein. Tab message send hoga.", color = Color(0xFF80520A), style = MaterialTheme.typography.bodySmall)
+                        Text("Fingerprint verification, MLS group join aur live peer connection ke baad sending enable hogi.", color = Color(0xFF80520A), style = MaterialTheme.typography.bodySmall)
                         TextButton(onClick = onOpenSecureSetup) { Text("Open secure setup") }
                     }
                 }
-            } else {
-                OutlinedTextField(
-                    value = messageDraft,
-                    onValueChange = onMessageDraftChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    placeholder = { Text("Type a message…") },
-                    minLines = 1,
-                    maxLines = 4
-                )
-                Spacer(Modifier.height(8.dp))
-                Button(
-                    onClick = onSendMessage,
-                    enabled = messageDraft.isNotBlank() && !sendBusy,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    Text(if (sendBusy) "Sending…" else "Send message")
-                }
+            }
+            OutlinedTextField(
+                value = messageDraft,
+                onValueChange = onMessageDraftChange,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                placeholder = { Text("Type a message…") },
+                minLines = 1,
+                maxLines = 4
+            )
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = onSendMessage,
+                enabled = canSendMessage && messageDraft.isNotBlank() && !sendBusy,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Text(if (sendBusy) "Sending…" else "Send message")
             }
             status?.let {
                 Text(it, Modifier.padding(top = 8.dp), color = blue, style = MaterialTheme.typography.bodySmall)
