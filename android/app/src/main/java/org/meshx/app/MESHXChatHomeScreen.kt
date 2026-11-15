@@ -131,7 +131,7 @@ internal fun MESHXChatHomeScreen(
                     Text("E2E", Modifier.padding(horizontal = 10.dp, vertical = 6.dp), color = Color(0xFF176B3A), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                 }
             }
-            HorizontalDivider(Modifier.padding(vertical = 10.dp))
+            Divider(Modifier.padding(vertical = 10.dp))
             val entries = localMessages.mapNotNull(::messageParts)
                 .filter { it.first == selectedChat }.sortedBy { it.second }
             Column(
