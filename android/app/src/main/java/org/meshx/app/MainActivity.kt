@@ -36,6 +36,7 @@ import java.security.PrivateKey
 import java.security.Signature
 import org.json.JSONObject
 import java.security.spec.ECGenParameterSpec
+import java.security.spec.PKCS8EncodedKeySpec
 import java.security.spec.X509EncodedKeySpec
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -44,6 +45,10 @@ import javax.crypto.spec.GCMParameterSpec
 import kotlinx.coroutines.delay
 
 private const val IDENTITY_ALIAS = "meshx_identity_v1"
+
+private object RecoveryIdentityVaultHolder {
+    @Volatile var current: RecoveryIdentityVault? = null
+}
 private const val PREFS_NAME = "meshx_local_contacts"
 
 private const val MESSAGE_KEY_ALIAS = "meshx_local_messages_aes_v1"
@@ -86,6 +91,10 @@ private fun decryptTransportIdentity(value: String): ByteArray {
 }
 
 private fun loadOrCreateTransportIdentity(prefs: android.content.SharedPreferences): ByteArray {
+    // Recovery-backed accounts always derive the transport identity from the mnemonic.
+    RecoveryIdentityVaultHolder.current?.load()?.let { material ->
+        return material.transportPrivateKey
+    }
     val saved = prefs.getString(TRANSPORT_IDENTITY_PREF, null)
     if (saved != null) {
         return try {
@@ -278,19 +287,28 @@ internal fun parsePublicIdentity(raw: String): ParsedPublicIdentity {
 }
 
 internal fun loadOrCreateIdentity(prefs: android.content.SharedPreferences): MeshxIdentity {
-    val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-    if (!keyStore.containsAlias(IDENTITY_ALIAS)) {
+    val recovery = RecoveryIdentityVaultHolder.current?.load()
+    val identityPublicKey: ByteArray
+    val identityPrivateKey: PrivateKey
+    if (recovery != null) {
+        identityPublicKey = recovery.signingPublicKeySpki
+        identityPrivateKey = KeyFactory.getInstance("EC")
+            .generatePrivate(PKCS8EncodedKeySpec(recovery.signingPrivateKeyPkcs8))
+    } else {
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        if (!keyStore.containsAlias(IDENTITY_ALIAS)) {
         val generator = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore")
         generator.initialize(KeyGenParameterSpec.Builder(
             IDENTITY_ALIAS,
             KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY
         ).setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
             .setDigests(KeyProperties.DIGEST_SHA256).build())
-        generator.generateKeyPair()
+            generator.generateKeyPair()
+        }
+        identityPublicKey = keyStore.getCertificate(IDENTITY_ALIAS).publicKey.encoded
+        identityPrivateKey = keyStore.getKey(IDENTITY_ALIAS, null) as? PrivateKey
+            ?: throw IllegalStateException("MESHX identity signing key is unavailable in Android Keystore.")
     }
-    val identityPublicKey = keyStore.getCertificate(IDENTITY_ALIAS).publicKey.encoded
-    val identityPrivateKey = keyStore.getKey(IDENTITY_ALIAS, null) as? PrivateKey
-        ?: throw IllegalStateException("MESHX identity signing key is unavailable in Android Keystore.")
     val transportIdentity = loadOrCreateTransportIdentity(prefs)
     val transportPublicKey = NativeMeshx.transportPublicKey(transportIdentity)
     val transportPeerId = NativeMeshx.transportPeerId(transportPublicKey)
@@ -320,6 +338,11 @@ private const val MLS_INVITATION_DOMAIN = "MESHX-MLS-INVITATION-V1"
 private const val MAX_MLS_ENVELOPE_PART_BYTES = 1024 * 1024
 
 internal fun loadIdentitySigningPrivateKey(): PrivateKey {
+    val recovery = RecoveryIdentityVaultHolder.current?.load()
+    if (recovery != null) {
+        return KeyFactory.getInstance("EC")
+            .generatePrivate(PKCS8EncodedKeySpec(recovery.signingPrivateKeyPkcs8))
+    }
     val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
     return keyStore.getKey(IDENTITY_ALIAS, null) as? PrivateKey
         ?: throw IllegalStateException("MESHX identity signing key is unavailable in Android Keystore.")
@@ -550,6 +573,8 @@ private fun makeQrBitmap(payload: String): android.graphics.Bitmap {
 private fun MeshxHome() {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE) }
+    val recoveryVault = remember { RecoveryIdentityVault(context).also { RecoveryIdentityVaultHolder.current = it } }
+    var showRecoverySetup by remember { mutableStateOf(false) }
     var nativeTransportStatus by remember { mutableStateOf("Preparing secure MESHX identity…") }
     var nativeTransportReady by remember { mutableStateOf(false) }
     var relayAddress by remember { mutableStateOf(prefs.getString("relay_address", "") ?: "") }
@@ -848,7 +873,23 @@ private fun MeshxHome() {
                 Text("Android prototype — Internet delivery and end-to-end chat are still in development.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 Spacer(Modifier.height(24.dp))
                 Text("Your digital identity", style = MaterialTheme.typography.titleLarge)
-                Text("No phone number or email required. Your private key stays in Android Keystore on this device.")
+                Text("No phone number or email required. Your private key stays protected on this device.")
+                OutlinedButton(onClick = { showRecoverySetup = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (recoveryVault.exists()) "Restore / replace recovery account" else "Create / restore 24-word recovery account")
+                }
+                if (showRecoverySetup) {
+                    RecoverySetupDialog(
+                        onDismiss = { showRecoverySetup = false },
+                        onRecoverySaved = {
+                            try {
+                                identity = loadOrCreateIdentity(prefs)
+                                error = "Recovery account saved. Restart MESHX so the network transport also uses this recovered identity."
+                            } catch (e: Exception) {
+                                error = e.localizedMessage ?: "Recovery account saved, but identity refresh failed. Restart and check again."
+                            }
+                        }
+                    )
+                }
                 Button(onClick = {
                     try {
                         identity = loadOrCreateIdentity(prefs)
