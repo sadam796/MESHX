@@ -27,13 +27,14 @@ import java.security.spec.PKCS8EncodedKeySpec
 @Composable
 internal fun RecoverySetupDialog(
     onDismiss: () -> Unit,
-    onRecoverySaved: () -> Unit
+    onRecoverySaved: () -> Unit,
+    initialMode: String = "choose"
 ) {
     val context = LocalContext.current
     val words = remember {
         context.assets.open("bip39-english.txt").bufferedReader().useLines { it.toList() }
     }
-    var mode by remember { mutableStateOf("choose") }
+    var mode by remember(initialMode) { mutableStateOf(initialMode) }
     var phrase by remember { mutableStateOf("") }
     var generatedPhrase by remember { mutableStateOf<List<String>>(emptyList()) }
     var backupConfirmed by remember { mutableStateOf(false) }
