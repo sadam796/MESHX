@@ -36,9 +36,11 @@ internal fun MESHXChatHomeScreen(
     var search by remember { mutableStateOf("") }
     var publicIdentityInput by remember { mutableStateOf("") }
     var publicIdentityStatus by remember { mutableStateOf<String?>(null) }
-    val navy = Color(0xFF071B35)
-    val blue = Color(0xFF1769AA)
-    val page = Color(0xFFF4F7FB)
+    var showAddContact by remember { mutableStateOf(false) }
+    var callNotice by remember { mutableStateOf<String?>(null) }
+    val navy = Color(0xFF102A43)
+    val green = Color(0xFF087E5B)
+    val page = Color(0xFFF5F7F8)
 
     fun messageParts(raw: String): Triple<String, Long, String>? {
         val parts = raw.split("#", limit = 3)
@@ -48,165 +50,198 @@ internal fun MESHXChatHomeScreen(
         } catch (_: Exception) { null }
     }
 
+    fun addContact() {
+        publicIdentityStatus = onAddPublicIdentity(publicIdentityInput.trim())
+        if (publicIdentityStatus?.startsWith("Added:") == true ||
+            publicIdentityStatus?.startsWith("Already added:") == true) {
+            publicIdentityInput = ""
+            showAddContact = false
+        }
+    }
+
     Column(
-        Modifier.fillMaxWidth().background(page, RoundedCornerShape(22.dp)).padding(16.dp)
+        Modifier.fillMaxSize().background(page).padding(horizontal = 14.dp, vertical = 10.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("MESHX", color = navy, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
-                Text("Private messages", color = Color(0xFF526477), style = MaterialTheme.typography.bodySmall)
+                Text(if (selectedChat == null) "Private chats" else "End-to-end private chat",
+                    color = Color(0xFF637381), style = MaterialTheme.typography.bodySmall)
             }
-            Surface(color = Color(0xFFE3F3E9), shape = CircleShape) {
-                Text("PRIVATE", Modifier.padding(horizontal = 12.dp, vertical = 7.dp), color = Color(0xFF176B3A), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+            if (selectedChat != null) {
+                TextButton(onClick = onBackToChats) { Text("Chats", color = green) }
+            } else {
+                TextButton(onClick = { showAddContact = true }) { Text("＋ Add", color = green, fontWeight = FontWeight.Bold) }
             }
         }
-        Spacer(Modifier.height(18.dp))
 
         if (selectedChat == null) {
-            Text("Chats", color = navy, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(12.dp))
             OutlinedTextField(
                 value = search,
-                onValueChange = { search = it },
+                onValueChange = {
+                    search = it
+                    if (it.trim().startsWith("MESHX2:")) {
+                        publicIdentityInput = it.trim()
+                        publicIdentityStatus = null
+                    }
+                },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                shape = RoundedCornerShape(14.dp),
-                placeholder = { Text("Search contacts") },
-                label = { Text("Search") }
+                shape = RoundedCornerShape(24.dp),
+                placeholder = { Text("Search chats or paste a public ID") },
+                leadingIcon = { Text("⌕", style = MaterialTheme.typography.headlineSmall) }
             )
+            if (search.trim().startsWith("MESHX2:")) {
+                TextButton(onClick = {
+                    publicIdentityInput = search.trim()
+                    addContact()
+                    search = ""
+                }) { Text("Add this public ID", color = green) }
+            }
             Spacer(Modifier.height(12.dp))
-            OutlinedTextField(
-                value = publicIdentityInput,
-                onValueChange = { publicIdentityInput = it; publicIdentityStatus = null },
-                modifier = Modifier.fillMaxWidth(),
-                minLines = 2,
-                maxLines = 3,
-                shape = RoundedCornerShape(14.dp),
-                label = { Text("Find a friend by public key") },
-                placeholder = { Text("Paste MESHX2 public identity") }
-            )
-            Button(
-                onClick = {
-                    publicIdentityStatus = onAddPublicIdentity(publicIdentityInput.trim())
-                    if (publicIdentityStatus?.startsWith("Added:") == true || publicIdentityStatus?.startsWith("Already added:") == true) publicIdentityInput = ""
-                },
-                enabled = publicIdentityInput.isNotBlank(),
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp)
-            ) { Text("Search and add contact") }
-            publicIdentityStatus?.let { Text(it, color = if (it.startsWith("Added:") || it.startsWith("Already")) Color(0xFF16834A) else Color(0xFFB3261E), style = MaterialTheme.typography.bodySmall) }
-            Spacer(Modifier.height(12.dp))
-            val filtered = contacts.filter { it.contains(search.trim(), ignoreCase = true) }
+            Text("CHATS", color = Color(0xFF637381), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(6.dp))
+            val filtered = contacts.filter { contact ->
+                contact.contains(search.trim(), ignoreCase = true) ||
+                    (search.isBlank() && contact.isNotBlank())
+            }
             if (filtered.isEmpty()) {
-                Surface(color = Color.White, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(18.dp)) {
-                        Text(if (contacts.isEmpty()) "Abhi koi chat nahi hai" else "No matching contact", color = navy, fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            if (contacts.isEmpty()) "Pehle apni identity banayein aur kisi contact ka public MESHX QR ya identity add karein. Contact add hone ke baad yahan chat dikhegi."
-                            else "Search ka naam ya fingerprint dobara check karein.",
-                            color = Color(0xFF526477), style = MaterialTheme.typography.bodySmall
-                        )
+                Column(
+                    Modifier.fillMaxWidth().padding(top = 54.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("✉", color = green, style = MaterialTheme.typography.displayMedium)
+                    Spacer(Modifier.height(12.dp))
+                    Text("No chats yet", color = navy, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("Tap + to add a friend using their MESHX public ID.",
+                        color = Color(0xFF637381), style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(14.dp))
+                    Button(onClick = { showAddContact = true }, colors = ButtonDefaults.buttonColors(containerColor = green)) {
+                        Text("＋ Add a friend")
                     }
                 }
             } else {
-                filtered.forEach { contact ->
-                    val latest = localMessages.mapNotNull(::messageParts)
-                        .filter { it.first == contact }.maxByOrNull { it.second }
-                    val bound = contactTransportPeers.any { it.startsWith("$contact#") }
-                    Row(
-                        Modifier.fillMaxWidth().padding(vertical = 5.dp)
-                            .background(Color.White, RoundedCornerShape(16.dp))
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Surface(color = Color(0xFFDCEAF7), shape = CircleShape, modifier = Modifier.size(48.dp)) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(contact.take(2), color = navy, fontWeight = FontWeight.Bold)
+                Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                    filtered.forEach { contact ->
+                        val latest = localMessages.mapNotNull(::messageParts)
+                            .filter { it.first == contact }.maxByOrNull { it.second }
+                        val bound = contactTransportPeers.any { it.startsWith("$contact#") }
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 3.dp)
+                                .background(Color.White, RoundedCornerShape(16.dp)).padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(color = Color(0xFFDCEFE8), shape = CircleShape, modifier = Modifier.size(48.dp)) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(contact.take(2), color = green, fontWeight = FontWeight.Bold)
+                                }
                             }
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(contact, color = navy, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                Text(latest?.third ?: if (bound) "Tap to open chat" else "New contact",
+                                    color = Color(0xFF637381), style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                            }
+                            TextButton(onClick = { onOpenChat(contact) }) { Text("Open", color = green) }
                         }
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(contact, color = navy, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                            Text(
-                                latest?.third ?: if (bound) "Ready for secure setup" else "Identity saved · transport not linked",
-                                color = Color(0xFF607184), style = MaterialTheme.typography.bodySmall, maxLines = 1
-                            )
-                            Text(
-                                if (contact in verifiedContacts) "✓ Fingerprint verified" else "Fingerprint not verified",
-                                color = if (contact in verifiedContacts) Color(0xFF16834A) else Color(0xFFB36B16),
-                                style = MaterialTheme.typography.labelSmall
-                            )
-                        }
-                        TextButton(onClick = { onOpenChat(contact) }) { Text("Open") }
                     }
                 }
             }
-            Spacer(Modifier.height(8.dp))
-            Text("Your messages stay on this device encrypted at rest. Internet delivery still depends on a reachable peer or configured relay.", color = Color(0xFF607184), style = MaterialTheme.typography.bodySmall)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                Button(
+                    onClick = { showAddContact = true },
+                    shape = CircleShape,
+                    colors = ButtonDefaults.buttonColors(containerColor = green),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
+                ) { Text("＋", style = MaterialTheme.typography.titleLarge) }
+            }
+            publicIdentityStatus?.let { Text(it, color = if (it.startsWith("Added:") || it.startsWith("Already")) green else MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         } else {
+            Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onBackToChats) { Text("‹ Chats") }
+                Surface(color = Color(0xFFDCEFE8), shape = CircleShape, modifier = Modifier.size(44.dp)) {
+                    Box(contentAlignment = Alignment.Center) { Text(selectedChat.take(2), color = green, fontWeight = FontWeight.Bold) }
+                }
+                Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Text(selectedChat, color = navy, fontWeight = FontWeight.Bold, maxLines = 1)
-                    Text(if (selectedChat in verifiedContacts) "Fingerprint verified" else "Verify fingerprint before trusting", color = if (selectedChat in verifiedContacts) Color(0xFF16834A) else Color(0xFFB36B16), style = MaterialTheme.typography.labelSmall)
+                    Text(if (selectedChat in verifiedContacts) "Contact verified" else "Verify this contact before trusting",
+                        color = if (selectedChat in verifiedContacts) green else Color(0xFF9A6500),
+                        style = MaterialTheme.typography.labelSmall)
                 }
-                Surface(color = if (canSendMessage) Color(0xFFE3F3E9) else Color(0xFFFFF3D9), shape = CircleShape) {
-                    Text(if (canSendMessage) "MLS READY" else "SETUP", Modifier.padding(horizontal = 10.dp, vertical = 6.dp), color = if (canSendMessage) Color(0xFF176B3A) else Color(0xFF80520A), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                }
+                TextButton(onClick = { callNotice = "Voice calling is not connected yet." }) { Text("☎", color = green, style = MaterialTheme.typography.titleLarge) }
+                TextButton(onClick = { callNotice = "Video calling is not connected yet." }) { Text("▣", color = green, style = MaterialTheme.typography.titleLarge) }
             }
+            callNotice?.let { Text(it, color = Color(0xFF9A6500), style = MaterialTheme.typography.bodySmall) }
             Divider(Modifier.padding(vertical = 10.dp))
             val entries = localMessages.mapNotNull(::messageParts)
                 .filter { it.first == selectedChat }.sortedBy { it.second }
             Column(
-                Modifier.fillMaxWidth().heightIn(min = 180.dp, max = 420.dp)
-                    .verticalScroll(rememberScrollState()).padding(vertical = 6.dp),
+                Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 if (entries.isEmpty()) {
-                    Text("No messages yet. Secure setup complete hone ke baad pehla message bhej sakte hain.", color = Color(0xFF607184), style = MaterialTheme.typography.bodySmall)
+                    Text("Say hello 👋", color = Color(0xFF637381), style = MaterialTheme.typography.bodySmall)
                 }
                 entries.forEach { entry ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        Surface(color = Color(0xFFDCEAF7), shape = RoundedCornerShape(16.dp), modifier = Modifier.widthIn(max = 290.dp)) {
+                        Surface(color = Color(0xFFDCEFE8), shape = RoundedCornerShape(16.dp), modifier = Modifier.widthIn(max = 290.dp)) {
                             Text(entry.third, Modifier.padding(horizontal = 14.dp, vertical = 10.dp), color = navy)
                         }
                     }
                 }
             }
             if (!canSendMessage) {
-                Surface(color = Color(0xFFFFF3D9), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(12.dp)) {
-                        Text("Secure chat setup required", color = Color(0xFF80520A), fontWeight = FontWeight.SemiBold)
-                        Text("Fingerprint verification, MLS group join aur live peer connection ke baad sending enable hogi.", color = Color(0xFF80520A), style = MaterialTheme.typography.bodySmall)
-                        TextButton(onClick = onOpenSecureSetup) { Text("Open secure setup") }
-                    }
-                }
+                Text("Secure chat setup is required before sending.", color = Color(0xFF9A6500), style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = onOpenSecureSetup) { Text("Finish secure chat setup", color = green) }
             }
-            OutlinedTextField(
-                value = messageDraft,
-                onValueChange = onMessageDraftChange,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                placeholder = { Text("Type a message…") },
-                minLines = 1,
-                maxLines = 4
-            )
-            Spacer(Modifier.height(8.dp))
-            Button(
-                onClick = onSendMessage,
-                enabled = canSendMessage && messageDraft.isNotBlank() && !sendBusy,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp)
-            ) {
-                Text(if (sendBusy) "Sending…" else "Send message")
+            Row(verticalAlignment = Alignment.Bottom) {
+                OutlinedTextField(
+                    value = messageDraft,
+                    onValueChange = onMessageDraftChange,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(22.dp),
+                    placeholder = { Text("Message") },
+                    minLines = 1,
+                    maxLines = 4
+                )
+                Spacer(Modifier.width(8.dp))
+                Button(
+                    onClick = onSendMessage,
+                    enabled = canSendMessage && messageDraft.isNotBlank() && !sendBusy,
+                    shape = CircleShape,
+                    colors = ButtonDefaults.buttonColors(containerColor = green),
+                    contentPadding = PaddingValues(14.dp)
+                ) { Text(if (sendBusy) "…" else "➤") }
             }
-            status?.let {
-                Text(it, Modifier.padding(top = 8.dp), color = blue, style = MaterialTheme.typography.bodySmall)
-            }
-            TextButton(onClick = onOpenSecureSetup, modifier = Modifier.align(Alignment.End)) {
-                Text("Advanced secure setup")
-            }
+            status?.let { Text(it, Modifier.padding(top = 6.dp), color = green, style = MaterialTheme.typography.bodySmall) }
         }
+    }
+
+    if (showAddContact) {
+        AlertDialog(
+            onDismissRequest = { showAddContact = false },
+            title = { Text("Add a friend") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Friend ka complete signed MESHX public ID paste karein.")
+                    OutlinedTextField(
+                        value = publicIdentityInput,
+                        onValueChange = { publicIdentityInput = it; publicIdentityStatus = null },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 3,
+                        maxLines = 5,
+                        label = { Text("MESHX public ID") },
+                        placeholder = { Text("MESHX2:…") }
+                    )
+                    publicIdentityStatus?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { addContact() }, enabled = publicIdentityInput.isNotBlank()) { Text("Search and add") }
+            },
+            dismissButton = { TextButton(onClick = { showAddContact = false }) { Text("Cancel") } }
+        )
     }
 }
