@@ -1,5 +1,7 @@
 package org.meshx.app
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -40,6 +42,7 @@ internal fun RecoverySetupDialog(
     var backupConfirmed by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var phraseCopied by remember { mutableStateOf(false) }
 
     fun savePhrase(value: String) {
         busy = true
@@ -101,6 +104,15 @@ internal fun RecoverySetupDialog(
                     "create" -> {
                         Text("Apne 24 words paper par likhein. Screenshot, chat ya kisi ko share mat karein. Ye naya account hoga; purana ID automatically recover nahi hoga.")
                         Text(phrase)
+                        OutlinedButton(
+                            onClick = {
+                                val clipboard = context.getSystemService(ClipboardManager::class.java)
+                                clipboard?.setPrimaryClip(ClipData.newPlainText("MESHX 24-word recovery phrase", phrase))
+                                phraseCopied = clipboard != null
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text(if (phraseCopied) "Copied 24 words" else "Copy 24 words") }
+                        Text("Copy karne ke baad phrase ko sirf apne private, safe place par paste karein. Clipboard se doosre apps access kar sakte hain.")
                         Row {
                             Checkbox(checked = backupConfirmed, onCheckedChange = { backupConfirmed = it })
                             Text("Maine 24 words ko safe jagah likh liya hai.")
