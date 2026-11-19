@@ -89,7 +89,7 @@ internal fun MESHXChatHomeScreen(
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 shape = RoundedCornerShape(24.dp),
-                placeholder = { Text("Search chats or paste a public ID") },
+                placeholder = { Text("Search saved chats or paste a public ID") },
                 leadingIcon = { Text("⌕", style = MaterialTheme.typography.headlineSmall) }
             )
             if (search.trim().startsWith("MESHX2:")) {
@@ -225,7 +225,7 @@ internal fun MESHXChatHomeScreen(
             title = { Text("Add a friend") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Friend ka complete signed MESHX public ID paste karein.")
+                    Text("Friend ka complete signed MESHX2 public ID paste karein. Yeh abhi global directory search nahi karta; ID ko verify karke contacts mein save karta hai.")
                     OutlinedTextField(
                         value = publicIdentityInput,
                         onValueChange = { publicIdentityInput = it; publicIdentityStatus = null },
@@ -239,7 +239,7 @@ internal fun MESHXChatHomeScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { addContact() }, enabled = publicIdentityInput.isNotBlank()) { Text("Search and add") }
+                TextButton(onClick = { addContact() }, enabled = publicIdentityInput.isNotBlank()) { Text("Verify and add ID") }
             },
             dismissButton = { TextButton(onClick = { showAddContact = false }) { Text("Cancel") } }
         )
