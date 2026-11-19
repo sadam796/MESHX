@@ -17,6 +17,9 @@ internal object NativeMeshx {
 
     private external fun nativeTransportStatus(): String
     private external fun nativeGenerateIdentity(): ByteArray
+    private external fun nativeDeriveRecoveryTransportIdentity(seed: ByteArray): ByteArray
+    private external fun nativeDeriveRecoverySigningPrivateKey(seed: ByteArray): ByteArray
+    private external fun nativeDeriveRecoverySigningPublicKey(seed: ByteArray): ByteArray
     private external fun nativeTransportPublicKey(identity: ByteArray): ByteArray
     private external fun nativeTransportPeerId(publicKey: ByteArray): String
     private external fun nativeFindPeer(peerId: String): String
@@ -46,6 +49,36 @@ internal object NativeMeshx {
             }
         } catch (error: UnsatisfiedLinkError) {
             throw IllegalStateException("Native identity generator unavailable: ${error.message ?: "unknown JNI error"}", error)
+        }
+    }
+
+    /**
+     * Deterministically derives the transport identity from a validated BIP-39 seed.
+     * The caller must clear the seed and protect the returned private identity.
+     */
+    fun deriveRecoveryTransportIdentity(seed: ByteArray): ByteArray {
+        require(seed.size == 64) { "MESHX recovery seed must be 64 bytes." }
+        check(loadError == null) { "Native bridge unavailable: $loadError" }
+        return nativeDeriveRecoveryTransportIdentity(seed).also {
+            check(it.isNotEmpty()) { "MESHX recovery transport identity derivation failed." }
+        }
+    }
+
+    /** Returns PKCS#8 DER for the deterministic P-256 signing private key. */
+    fun deriveRecoverySigningPrivateKey(seed: ByteArray): ByteArray {
+        require(seed.size == 64) { "MESHX recovery seed must be 64 bytes." }
+        check(loadError == null) { "Native bridge unavailable: $loadError" }
+        return nativeDeriveRecoverySigningPrivateKey(seed).also {
+            check(it.isNotEmpty()) { "MESHX recovery signing-key derivation failed." }
+        }
+    }
+
+    /** Returns X.509 SubjectPublicKeyInfo DER for the same deterministic signing key. */
+    fun deriveRecoverySigningPublicKey(seed: ByteArray): ByteArray {
+        require(seed.size == 64) { "MESHX recovery seed must be 64 bytes." }
+        check(loadError == null) { "Native bridge unavailable: $loadError" }
+        return nativeDeriveRecoverySigningPublicKey(seed).also {
+            check(it.isNotEmpty()) { "MESHX recovery public-key derivation failed." }
         }
     }
 

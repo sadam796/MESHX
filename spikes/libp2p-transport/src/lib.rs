@@ -391,9 +391,20 @@ impl DiskQueue {
 
     fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> Result<(), std::io::Error> {
         use std::io::Write;
-        let temp = path.with_extension(format!("tmp-{}", std::process::id()));
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        // Use create_new so a stale temp file can never be truncated or reused.
+        // The nonce also avoids collisions if multiple queue instances share a PID.
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let temp = path.with_extension(format!("tmp-{}-{nonce}", std::process::id()));
         {
-            let mut file = std::fs::File::create(&temp)?;
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temp)?;
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
@@ -402,7 +413,14 @@ impl DiskQueue {
             file.write_all(bytes)?;
             file.sync_all()?;
         }
-        std::fs::rename(temp, path)?;
+        std::fs::rename(&temp, path)?;
+
+        // Sync the containing directory so the rename itself is durable across
+        // a host crash, not merely the file contents.
+        #[cfg(unix)]
+        if let Some(parent) = path.parent() {
+            std::fs::File::open(parent)?.sync_all()?;
+        }
         Ok(())
     }
 
