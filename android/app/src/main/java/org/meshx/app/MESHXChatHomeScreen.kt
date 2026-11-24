@@ -11,6 +11,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -35,6 +36,10 @@ internal fun MESHXChatHomeScreen(
 ) {
     var search by remember { mutableStateOf("") }
     var publicIdentityInput by remember { mutableStateOf("") }
+    var contactNameInput by remember { mutableStateOf("") }
+    val context = LocalContext.current
+    val aliasPrefs = remember { context.getSharedPreferences("meshx_contact_names", android.content.Context.MODE_PRIVATE) }
+    var contactAliases by remember { mutableStateOf(aliasPrefs.all.mapValues { it.value.toString() } ) }
     var publicIdentityStatus by remember { mutableStateOf<String?>(null) }
     var showAddContact by remember { mutableStateOf(false) }
     var callNotice by remember { mutableStateOf<String?>(null) }
@@ -54,7 +59,13 @@ internal fun MESHXChatHomeScreen(
         publicIdentityStatus = onAddPublicIdentity(publicIdentityInput.trim())
         if (publicIdentityStatus?.startsWith("Added:") == true ||
             publicIdentityStatus?.startsWith("Already added:") == true) {
+            try {
+                val fingerprint = parsePublicIdentity(publicIdentityInput.trim()).fingerprint
+                val label = contactNameInput.trim()
+                if (label.isNotBlank()) { aliasPrefs.edit().putString(fingerprint, label).apply(); contactAliases = aliasPrefs.all.mapValues { it.value.toString() } }
+            } catch (_: Exception) { }
             publicIdentityInput = ""
+            contactNameInput = ""
             showAddContact = false
         }
     }
@@ -104,6 +115,7 @@ internal fun MESHXChatHomeScreen(
             Spacer(Modifier.height(6.dp))
             val filtered = contacts.filter { contact ->
                 contact.contains(search.trim(), ignoreCase = true) ||
+                    (contactAliases[contact]?.contains(search.trim(), ignoreCase = true) == true) ||
                     (search.isBlank() && contact.isNotBlank())
             }
             if (filtered.isEmpty()) {
@@ -139,8 +151,8 @@ internal fun MESHXChatHomeScreen(
                             }
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
-                                Text(contact, color = navy, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                                Text(latest?.third ?: if (bound) "Tap to open chat" else "New contact",
+                                Text(contactAliases[contact]?.takeIf { it.isNotBlank() } ?: contact, color = navy, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                Text(latest?.third ?: if (bound) "Tap to open chat" else "Saved contact",
                                     color = Color(0xFF637381), style = MaterialTheme.typography.bodySmall, maxLines = 1)
                             }
                             TextButton(onClick = { onOpenChat(contact) }) { Text("Open", color = green) }
@@ -225,7 +237,15 @@ internal fun MESHXChatHomeScreen(
             title = { Text("Add a friend") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Friend ka complete signed MESHX2 public ID paste karein. Yeh abhi global directory search nahi karta; ID ko verify karke contacts mein save karta hai.")
+                    Text("Friend ka naam aur signed MESHX2 public ID paste karein. ID verify hokar contacts mein save hogi.")
+                    OutlinedTextField(
+                        value = contactNameInput,
+                        onValueChange = { contactNameInput = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("Friend ka naam") },
+                        placeholder = { Text("Jaise: Ali") }
+                    )
                     OutlinedTextField(
                         value = publicIdentityInput,
                         onValueChange = { publicIdentityInput = it; publicIdentityStatus = null },
@@ -239,7 +259,7 @@ internal fun MESHXChatHomeScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { addContact() }, enabled = publicIdentityInput.isNotBlank()) { Text("Verify and add ID") }
+                TextButton(onClick = { addContact() }, enabled = publicIdentityInput.isNotBlank() && contactNameInput.isNotBlank()) { Text("Save contact") }
             },
             dismissButton = { TextButton(onClick = { showAddContact = false }) { Text("Cancel") } }
         )
