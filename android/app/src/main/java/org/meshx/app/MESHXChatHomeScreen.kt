@@ -80,35 +80,29 @@ internal fun MESHXChatHomeScreen(
     Column(
         Modifier.fillMaxSize().background(page)
     ) {
-        Surface(
-            color = Color(0xFF075E54),
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(bottomStart = 22.dp, bottomEnd = 22.dp)
-        ) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+        Surface(color = Color(0xFF075E54), modifier = Modifier.fillMaxWidth()) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("◈  MESHX", color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
-                    Text(if (selectedChat == null) "CHAT" else "End-to-end private chat",
-                        color = Color(0xFFD1E9E2), style = MaterialTheme.typography.bodySmall)
+                    Text("MESHX", color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    Text(if (selectedChat == null) "Private messaging" else "End-to-end private chat", color = Color(0xFFD1E9E2), style = MaterialTheme.typography.bodySmall)
                 }
                 if (selectedChat != null) {
-                    TextButton(onClick = onBackToChats) { Text("‹ Chats", color = Color.White) }
+                    TextButton(onClick = onBackToChats) { Text("‹", color = Color.White, style = MaterialTheme.typography.titleLarge) }
                 } else {
-                    TextButton(onClick = { activeTab = "Chats"; showAddContact = true }) { Text("＋ Add ID", color = Color.White, fontWeight = FontWeight.Bold) }
+                    TextButton(onClick = { activeTab = "Chats"; showAddContact = true }) { Text("＋", color = Color.White, style = MaterialTheme.typography.headlineSmall) }
+                    TextButton(onClick = { activeTab = "Chats" }) { Text("⌕", color = Color.White, style = MaterialTheme.typography.headlineSmall) }
+                    TextButton(onClick = { activeTab = "Settings" }) { Text("⋮", color = Color.White, style = MaterialTheme.typography.headlineSmall) }
                 }
             }
         }
 
         if (selectedChat == null) {
             Row(
-                Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 12.dp, vertical = 5.dp),
+                Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 10.dp, vertical = 3.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("CHAT", color = navy, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Text("CONNECTION", color = Color(0xFF637781), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("Internet", color = navy, style = MaterialTheme.typography.labelSmall)
                     Switch(checked = internetEnabled, onCheckedChange = onInternetEnabledChange)
@@ -237,7 +231,7 @@ internal fun MESHXChatHomeScreen(
                                 Text(latest?.third ?: if (bound) "Tap to open chat" else "Saved contact",
                                     color = Color(0xFF637381), style = MaterialTheme.typography.bodySmall, maxLines = 1)
                             }
-                            TextButton(onClick = { onOpenChat(contact) }) { Text("Open", color = green) }
+                            Text("›", color = Color(0xFF637381), style = MaterialTheme.typography.titleLarge)
                         }
                     }
                 }
@@ -252,11 +246,15 @@ internal fun MESHXChatHomeScreen(
             }
             publicIdentityStatus?.let { Text(it, color = if (it.startsWith("Added:") || it.startsWith("Already")) green else MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             }
-            Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 10.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+            NavigationBar(containerColor = Color.White, tonalElevation = 2.dp) {
                 listOf("Chats", "Contacts", "Settings").forEach { tab ->
-                    TextButton(onClick = { activeTab = tab; search = "" }) {
-                        Text(tab, color = if (activeTab == tab) green else Color(0xFF637381), fontWeight = if (activeTab == tab) FontWeight.Bold else FontWeight.Normal)
-                    }
+                    NavigationBarItem(
+                        selected = activeTab == tab,
+                        onClick = { activeTab = tab; search = "" },
+                        icon = { Text(when (tab) { "Chats" -> "▤"; "Contacts" -> "♙"; else -> "⚙" }, color = if (activeTab == tab) green else Color(0xFF637381), style = MaterialTheme.typography.titleLarge) },
+                        label = { Text(tab) },
+                        colors = NavigationBarItemDefaults.colors(selectedIconColor = green, selectedTextColor = green, indicatorColor = Color(0xFFDDF3ED), unselectedTextColor = Color(0xFF637381))
+                    )
                 }
             }
         } else {
