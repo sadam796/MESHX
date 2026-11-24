@@ -91,18 +91,37 @@ internal fun MESHXChatHomeScreen(
             ) {
                 Column(Modifier.weight(1f)) {
                     Text("◈  MESHX", color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
-                    Text(if (selectedChat == null) activeTab else "End-to-end private chat",
+                    Text(if (selectedChat == null) "CHAT" else "End-to-end private chat",
                         color = Color(0xFFD1E9E2), style = MaterialTheme.typography.bodySmall)
                 }
                 if (selectedChat != null) {
                     TextButton(onClick = onBackToChats) { Text("‹ Chats", color = Color.White) }
                 } else {
-                    TextButton(onClick = { showAddContact = true }) { Text("＋ Add Friend", color = Color.White, fontWeight = FontWeight.Bold) }
+                    TextButton(onClick = { activeTab = "Chats"; showAddContact = true }) { Text("＋ Add ID", color = Color.White, fontWeight = FontWeight.Bold) }
                 }
             }
         }
 
         if (selectedChat == null) {
+            Row(
+                Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 12.dp, vertical = 5.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("CHAT", color = navy, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Internet", color = navy, style = MaterialTheme.typography.labelSmall)
+                    Switch(checked = internetEnabled, onCheckedChange = onInternetEnabledChange)
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Bluetooth", color = navy, style = MaterialTheme.typography.labelSmall)
+                    Switch(checked = bluetoothEnabled, onCheckedChange = onBluetoothEnabledChange)
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Wi-Fi", color = navy, style = MaterialTheme.typography.labelSmall)
+                    Switch(checked = wifiDirectEnabled, onCheckedChange = onWifiDirectEnabledChange)
+                }
+            }
             if (activeTab == "Settings") {
                 Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Settings", color = navy, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
@@ -162,7 +181,7 @@ internal fun MESHXChatHomeScreen(
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 shape = RoundedCornerShape(18.dp),
-                placeholder = { Text("Search saved chats or paste a public ID") },
+                placeholder = { Text("Search by Public ID") },
                 leadingIcon = { Text("⌕", style = MaterialTheme.typography.headlineSmall) }
             )
             if (search.trim().startsWith("MESHX2:")) {
@@ -171,7 +190,7 @@ internal fun MESHXChatHomeScreen(
                     contactNameInput = ""
                     showAddContact = true
                     search = ""
-                }) { Text("Add this public ID", color = green) }
+                }) { Text("Search / Add this Public ID", color = green) }
             }
             Spacer(Modifier.height(12.dp))
             Text(if (activeTab == "Contacts") "CONTACTS" else "CHATS", color = Color(0xFF637381), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
