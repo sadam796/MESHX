@@ -590,6 +590,9 @@ private fun MeshxHome() {
     var recoveryEntryMode by remember { mutableStateOf("choose") }
     var nativeTransportStatus by remember { mutableStateOf("Preparing secure MESHX identity…") }
     var nativeTransportReady by remember { mutableStateOf(false) }
+    var internetEnabled by remember { mutableStateOf(prefs.getBoolean("transport_internet_enabled", true)) }
+    var bluetoothEnabled by remember { mutableStateOf(prefs.getBoolean("transport_bluetooth_enabled", false)) }
+    var wifiDirectEnabled by remember { mutableStateOf(prefs.getBoolean("transport_wifi_direct_enabled", false)) }
     var relayAddress by remember { mutableStateOf(prefs.getString("relay_address", "") ?: "") }
     var bootstrapAddresses by remember {
         mutableStateOf(prefs.getString("bootstrap_peers", "") ?: "")
@@ -614,8 +617,8 @@ private fun MeshxHome() {
             nativeTransportReady = false
         }
     }
-    LaunchedEffect(nativeTransportReady) {
-        if (nativeTransportReady) {
+    LaunchedEffect(nativeTransportReady, internetEnabled) {
+        if (nativeTransportReady && internetEnabled) {
             while (true) {
                 delay(1500)
                 nativeTransportStatus = NativeMeshx.status()
@@ -672,9 +675,9 @@ private fun MeshxHome() {
 
     // Poll the currently open contact for signed MLS setup envelopes and chat
     // ciphertext. Ordinary messages stay queued until the MLS group is joined.
-    LaunchedEffect(nativeTransportReady, selectedChat) {
+    LaunchedEffect(nativeTransportReady, internetEnabled, selectedChat) {
         val chatId = selectedChat
-        if (nativeTransportReady && chatId != null) {
+        if (nativeTransportReady && internetEnabled && chatId != null) {
             while (true) {
                 delay(1500)
                 try {
@@ -869,8 +872,8 @@ private fun MeshxHome() {
                 Spacer(Modifier.height(24.dp))
                 Text("MESHX", style = MaterialTheme.typography.headlineLarge)
                 Text("Global private messaging")
-                NearbyBluetoothPanel()
-                NearbyWifiDirectPanel(
+                if (bluetoothEnabled) NearbyBluetoothPanel()
+                if (wifiDirectEnabled) NearbyWifiDirectPanel(
                     activeChatName = selectedChat,
                     outgoingCiphertextBase64 = mlsCiphertextText,
                     onDecryptCiphertext = { chatId, encrypted ->
@@ -1044,6 +1047,22 @@ private fun MeshxHome() {
                     selectedChat = selectedChat,
                     verifiedContacts = verifiedContacts,
                     contactTransportPeers = contactTransportPeers,
+                    internetEnabled = internetEnabled,
+                    bluetoothEnabled = bluetoothEnabled,
+                    wifiDirectEnabled = wifiDirectEnabled,
+                    onInternetEnabledChange = { enabled ->
+                        internetEnabled = enabled
+                        prefs.edit().putBoolean("transport_internet_enabled", enabled).apply()
+                        if (!enabled) nativeTransportStatus = "Internet transport paused for MESHX chat and inbox polling."
+                    },
+                    onBluetoothEnabledChange = { enabled ->
+                        bluetoothEnabled = enabled
+                        prefs.edit().putBoolean("transport_bluetooth_enabled", enabled).apply()
+                    },
+                    onWifiDirectEnabledChange = { enabled ->
+                        wifiDirectEnabled = enabled
+                        prefs.edit().putBoolean("transport_wifi_direct_enabled", enabled).apply()
+                    },
                     messageDraft = messageDraft,
                     onMessageDraftChange = { messageDraft = it },
                     canSendMessage = selectedChat?.let { chatId ->
@@ -1054,7 +1073,7 @@ private fun MeshxHome() {
                         chatId in verifiedContacts &&
                             groupId != null &&
                             runCatching { mlsRepository.restoreAndValidateGroupState(groupId) }.getOrDefault(false) &&
-                            nativeTransportReady &&
+                            nativeTransportReady && internetEnabled &&
                             contactTransportPeers.any { it.startsWith("$chatId#") }
                     } ?: false,
                     sendBusy = mlsBusy,
@@ -1104,6 +1123,7 @@ private fun MeshxHome() {
                                 val peerId = contactTransportPeers.firstOrNull { it.startsWith("$chatId#") }
                                     ?.substringAfter("#")
                                     ?: throw IllegalStateException("Contact ka signed transport Peer ID missing hai.")
+                                check(internetEnabled) { "Internet transport Settings mein OFF hai." }
                                 check(nativeTransportReady) { "MESHX Internet transport abhi ready nahi hai." }
                                 val plain = messageDraft.trim().toByteArray(Charsets.UTF_8)
                                 check(plain.isNotEmpty()) { "Message khaali hai." }
@@ -1173,7 +1193,7 @@ private fun MeshxHome() {
                             }) { Text("Create signed KeyPackage") }
                             OutlinedTextField(value = mlsKeyPackageText, onValueChange = { mlsKeyPackageText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Signed MESHXK1 KeyPackage") }, minLines = 2)
                             Button(
-                                enabled = !mlsBusy && nativeTransportReady && chatTransportPeerId != null && mlsKeyPackageText.startsWith("MESHXK1:"),
+                                enabled = !mlsBusy && internetEnabled && nativeTransportReady && chatTransportPeerId != null && mlsKeyPackageText.startsWith("MESHXK1:"),
                                 onClick = {
                                     mlsBusy = true
                                     try {
@@ -1211,7 +1231,7 @@ private fun MeshxHome() {
                             }) { Text("Verify and create signed invitation") }
                             OutlinedTextField(value = mlsInvitationText, onValueChange = { mlsInvitationText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Signed MESHXI1 Welcome invitation") }, minLines = 2)
                             Button(
-                                enabled = !mlsBusy && nativeTransportReady && chatTransportPeerId != null && mlsInvitationText.startsWith("MESHXI1:"),
+                                enabled = !mlsBusy && internetEnabled && nativeTransportReady && chatTransportPeerId != null && mlsInvitationText.startsWith("MESHXI1:"),
                                 onClick = {
                                     mlsBusy = true
                                     try {
@@ -1257,7 +1277,7 @@ private fun MeshxHome() {
                             }) { Text("Encrypt message") }
                             OutlinedTextField(value = mlsCiphertextText, onValueChange = { mlsCiphertextText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Encrypted ciphertext (retry / manual fallback)") }, minLines = 2)
                             Button(
-                                enabled = !mlsBusy && nativeTransportReady && chatTransportPeerId != null && mlsCiphertextText.isNotBlank(),
+                                enabled = !mlsBusy && internetEnabled && nativeTransportReady && chatTransportPeerId != null && mlsCiphertextText.isNotBlank(),
                                 onClick = {
                                     mlsBusy = true
                                     try {
