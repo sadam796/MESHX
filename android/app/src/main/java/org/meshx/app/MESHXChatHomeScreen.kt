@@ -35,6 +35,7 @@ internal fun MESHXChatHomeScreen(
     onOpenSecureSetup: () -> Unit
 ) {
     var search by remember { mutableStateOf("") }
+    var activeTab by remember { mutableStateOf("Chats") }
     var publicIdentityInput by remember { mutableStateOf("") }
     var contactNameInput by remember { mutableStateOf("") }
     val context = LocalContext.current
@@ -84,7 +85,7 @@ internal fun MESHXChatHomeScreen(
             ) {
                 Column(Modifier.weight(1f)) {
                     Text("◈  MESHX", color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
-                    Text(if (selectedChat == null) "Private chats" else "End-to-end private chat",
+                    Text(if (selectedChat == null) activeTab else "End-to-end private chat",
                         color = Color(0xFFD1E9E2), style = MaterialTheme.typography.bodySmall)
                 }
                 if (selectedChat != null) {
@@ -96,6 +97,24 @@ internal fun MESHXChatHomeScreen(
         }
 
         if (selectedChat == null) {
+            if (activeTab == "Settings") {
+                Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Settings", color = navy, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    Text("Your private MESHX account and connection options", color = Color(0xFF637381))
+                    listOf("Account & recovery", "Privacy & security", "Bluetooth transport", "Wi-Fi Direct transport", "Internet transport", "Notifications").forEach { item ->
+                        Surface(color = Color.White, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+                            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(item, modifier = Modifier.weight(1f), color = navy, fontWeight = FontWeight.SemiBold)
+                                Text("›", color = green, style = MaterialTheme.typography.titleLarge)
+                            }
+                        }
+                    }
+                    Surface(color = Color(0xFFE7F5EF), shape = RoundedCornerShape(14.dp)) {
+                        Text("Connection switches and account recovery are not yet connected on this Settings screen.", Modifier.padding(14.dp), color = Color(0xFF075E54), style = MaterialTheme.typography.bodySmall)
+                    }
+                    Button(onClick = onOpenSecureSetup, colors = ButtonDefaults.buttonColors(containerColor = green)) { Text("Secure chat setup") }
+                }
+            } else {
             Spacer(Modifier.height(12.dp))
             OutlinedTextField(
                 value = search,
@@ -121,7 +140,7 @@ internal fun MESHXChatHomeScreen(
                 }) { Text("Add this public ID", color = green) }
             }
             Spacer(Modifier.height(12.dp))
-            Text("CHATS", color = Color(0xFF637381), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+            Text(if (activeTab == "Contacts") "CONTACTS" else "CHATS", color = Color(0xFF637381), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))
             val filtered = contacts.filter { contact ->
                 contact.contains(search.trim(), ignoreCase = true) ||
@@ -179,6 +198,14 @@ internal fun MESHXChatHomeScreen(
                 ) { Text("＋", style = MaterialTheme.typography.titleLarge) }
             }
             publicIdentityStatus?.let { Text(it, color = if (it.startsWith("Added:") || it.startsWith("Already")) green else MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+            }
+            Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 10.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+                listOf("Chats", "Contacts", "Settings").forEach { tab ->
+                    TextButton(onClick = { activeTab = tab; search = "" }) {
+                        Text(tab, color = if (activeTab == tab) green else Color(0xFF637381), fontWeight = if (activeTab == tab) FontWeight.Bold else FontWeight.Normal)
+                    }
+                }
+            }
         } else {
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
