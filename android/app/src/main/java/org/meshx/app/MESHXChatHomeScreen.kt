@@ -106,7 +106,8 @@ internal fun MESHXChatHomeScreen(
             if (search.trim().startsWith("MESHX2:")) {
                 TextButton(onClick = {
                     publicIdentityInput = search.trim()
-                    addContact()
+                    contactNameInput = ""
+                    showAddContact = true
                     search = ""
                 }) { Text("Add this public ID", color = green) }
             }
@@ -146,7 +147,7 @@ internal fun MESHXChatHomeScreen(
                         ) {
                             Surface(color = Color(0xFFDCEFE8), shape = CircleShape, modifier = Modifier.size(48.dp)) {
                                 Box(contentAlignment = Alignment.Center) {
-                                    Text(contact.take(2), color = green, fontWeight = FontWeight.Bold)
+                                    Text((contactAliases[contact]?.takeIf { it.isNotBlank() } ?: contact).take(2).uppercase(), color = green, fontWeight = FontWeight.Bold)
                                 }
                             }
                             Spacer(Modifier.width(12.dp))
@@ -255,7 +256,7 @@ internal fun MESHXChatHomeScreen(
                         label = { Text("MESHX public ID") },
                         placeholder = { Text("MESHX2:…") }
                     )
-                    publicIdentityStatus?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                    publicIdentityStatus?.let { Text(it, color = if (it.startsWith("Added:") || it.startsWith("Already")) green else MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 }
             },
             confirmButton = {
