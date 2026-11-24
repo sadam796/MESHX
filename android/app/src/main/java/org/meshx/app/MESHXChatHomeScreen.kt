@@ -23,6 +23,12 @@ internal fun MESHXChatHomeScreen(
     selectedChat: String?,
     verifiedContacts: Set<String>,
     contactTransportPeers: Set<String>,
+    internetEnabled: Boolean,
+    bluetoothEnabled: Boolean,
+    wifiDirectEnabled: Boolean,
+    onInternetEnabledChange: (Boolean) -> Unit,
+    onBluetoothEnabledChange: (Boolean) -> Unit,
+    onWifiDirectEnabledChange: (Boolean) -> Unit,
     messageDraft: String,
     onMessageDraftChange: (String) -> Unit,
     canSendMessage: Boolean,
@@ -101,16 +107,44 @@ internal fun MESHXChatHomeScreen(
                 Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Settings", color = navy, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     Text("Your private MESHX account and connection options", color = Color(0xFF637381))
-                    listOf("Account & recovery", "Privacy & security", "Bluetooth transport", "Wi-Fi Direct transport", "Internet transport", "Notifications").forEach { item ->
+                    Surface(color = Color.White, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Connection preferences", color = navy, fontWeight = FontWeight.Bold)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("Internet", color = navy, fontWeight = FontWeight.SemiBold)
+                                    Text("MESHX Internet send aur inbox polling", color = Color(0xFF637381), style = MaterialTheme.typography.bodySmall)
+                                }
+                                Switch(checked = internetEnabled, onCheckedChange = onInternetEnabledChange)
+                            }
+                            Divider()
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("Bluetooth", color = navy, fontWeight = FontWeight.SemiBold)
+                                    Text("Experimental paired-device ciphertext panel", color = Color(0xFF637381), style = MaterialTheme.typography.bodySmall)
+                                }
+                                Switch(checked = bluetoothEnabled, onCheckedChange = onBluetoothEnabledChange)
+                            }
+                            Divider()
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("Wi-Fi Direct", color = navy, fontWeight = FontWeight.SemiBold)
+                                    Text("Experimental nearby encrypted transfer panel", color = Color(0xFF637381), style = MaterialTheme.typography.bodySmall)
+                                }
+                                Switch(checked = wifiDirectEnabled, onCheckedChange = onWifiDirectEnabledChange)
+                            }
+                        }
+                    }
+                    Surface(color = Color(0xFFE7F5EF), shape = RoundedCornerShape(14.dp)) {
+                        Text("Internet OFF chat send aur inbox polling rokta hai. Bluetooth / Wi-Fi switches sirf experimental panels ko enable karte hain; ye abhi normal chat ka automatic transport nahi hain.", Modifier.padding(14.dp), color = Color(0xFF075E54), style = MaterialTheme.typography.bodySmall)
+                    }
+                    listOf("Account & recovery", "Privacy & security", "Notifications").forEach { item ->
                         Surface(color = Color.White, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
                             Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(item, modifier = Modifier.weight(1f), color = navy, fontWeight = FontWeight.SemiBold)
                                 Text("›", color = green, style = MaterialTheme.typography.titleLarge)
                             }
                         }
-                    }
-                    Surface(color = Color(0xFFE7F5EF), shape = RoundedCornerShape(14.dp)) {
-                        Text("Connection switches and account recovery are not yet connected on this Settings screen.", Modifier.padding(14.dp), color = Color(0xFF075E54), style = MaterialTheme.typography.bodySmall)
                     }
                     Button(onClick = onOpenSecureSetup, colors = ButtonDefaults.buttonColors(containerColor = green)) { Text("Secure chat setup") }
                 }
