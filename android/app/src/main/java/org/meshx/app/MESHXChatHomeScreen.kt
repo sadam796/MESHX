@@ -71,18 +71,27 @@ internal fun MESHXChatHomeScreen(
     }
 
     Column(
-        Modifier.fillMaxSize().background(page).padding(horizontal = 14.dp, vertical = 10.dp)
+        Modifier.fillMaxSize().background(page)
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("MESHX", color = navy, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
-                Text(if (selectedChat == null) "Private chats" else "End-to-end private chat",
-                    color = Color(0xFF637381), style = MaterialTheme.typography.bodySmall)
-            }
-            if (selectedChat != null) {
-                TextButton(onClick = onBackToChats) { Text("Chats", color = green) }
-            } else {
-                TextButton(onClick = { showAddContact = true }) { Text("＋ Add", color = green, fontWeight = FontWeight.Bold) }
+        Surface(
+            color = Color(0xFF075E54),
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(bottomStart = 22.dp, bottomEnd = 22.dp)
+        ) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("◈  MESHX", color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
+                    Text(if (selectedChat == null) "Private chats" else "End-to-end private chat",
+                        color = Color(0xFFD1E9E2), style = MaterialTheme.typography.bodySmall)
+                }
+                if (selectedChat != null) {
+                    TextButton(onClick = onBackToChats) { Text("‹ Chats", color = Color.White) }
+                } else {
+                    TextButton(onClick = { showAddContact = true }) { Text("＋ Add Friend", color = Color.White, fontWeight = FontWeight.Bold) }
+                }
             }
         }
 
@@ -99,7 +108,7 @@ internal fun MESHXChatHomeScreen(
                 },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                shape = RoundedCornerShape(24.dp),
+                shape = RoundedCornerShape(18.dp),
                 placeholder = { Text("Search saved chats or paste a public ID") },
                 leadingIcon = { Text("⌕", style = MaterialTheme.typography.headlineSmall) }
             )
@@ -142,7 +151,7 @@ internal fun MESHXChatHomeScreen(
                         val bound = contactTransportPeers.any { it.startsWith("$contact#") }
                         Row(
                             Modifier.fillMaxWidth().padding(vertical = 3.dp)
-                                .background(Color.White, RoundedCornerShape(16.dp)).padding(12.dp),
+                                .background(Color.White, RoundedCornerShape(18.dp)).padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Surface(color = Color(0xFFDCEFE8), shape = CircleShape, modifier = Modifier.size(48.dp)) {
@@ -199,7 +208,7 @@ internal fun MESHXChatHomeScreen(
                 }
                 entries.forEach { entry ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        Surface(color = Color(0xFFDCEFE8), shape = RoundedCornerShape(16.dp), modifier = Modifier.widthIn(max = 290.dp)) {
+                        Surface(color = Color(0xFFD8F5D0), shape = RoundedCornerShape(topStart = 16.dp, topEnd = 4.dp, bottomStart = 16.dp, bottomEnd = 16.dp), modifier = Modifier.widthIn(max = 290.dp)) {
                             Text(entry.third, Modifier.padding(horizontal = 14.dp, vertical = 10.dp), color = navy)
                         }
                     }
