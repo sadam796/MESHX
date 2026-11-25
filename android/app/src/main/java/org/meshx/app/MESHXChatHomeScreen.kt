@@ -47,7 +47,7 @@ internal fun MESHXChatHomeScreen(
     var contactNameInput by remember { mutableStateOf("") }
     val context = LocalContext.current
     val aliasPrefs = remember { context.getSharedPreferences("meshx_contact_names", android.content.Context.MODE_PRIVATE) }
-    var contactAliases by remember { mutableStateOf(aliasPrefs.all.mapValues { it.value.toString() } }
+    var contactAliases by remember { mutableStateOf(aliasPrefs.all.mapValues { it.value.toString() }) }
     var publicIdentityStatus by remember { mutableStateOf<String?>(null) }
     var showAddContact by remember { mutableStateOf(false) }
     var showSavedDialog by remember { mutableStateOf(false) }
@@ -163,7 +163,7 @@ internal fun MESHXChatHomeScreen(
                 publicIdentityStatus?.let { Text(it, color = if (it.startsWith("Added:") || it.startsWith("Already")) green else MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             }
             NavigationBar(containerColor = Color.White, tonalElevation = 2.dp) {
-                listOf("Chats", "Contacts", "Settings").forEach { tab -> NavigationBarItem(selected = activeTab == tab, onClick = { activeTab = tab; search = "" }, icon = { Text(when (tab) { "Chats" -> "▤"; "Contacts" -> "♙"; else -> "⚙" }, color = if (activeTab == tab) green else Color(0xFF637781), style = MaterialTheme.typography.titleLarge) }, label = { Text(tab) }, colors = NavigationBarItemDefaults.colors(selectedIconColor = green, selectedTextColor = green, indicatorColor = Color(0xFFDDF3ED), unselectedTextColor = Color(0xFF637781)) }
+                listOf("Chats", "Contacts", "Settings").forEach { tab ->\n                    NavigationBarItem(\n                        selected = activeTab == tab,\n                        onClick = { activeTab = tab; search = "" },\n                        icon = { Text(when (tab) { "Chats" -> "▤"; "Contacts" -> "♙"; else -> "⚙" }, color = if (activeTab == tab) green else Color(0xFF637781), style = MaterialTheme.typography.titleLarge) },\n                        label = { Text(tab) },\n                        colors = NavigationBarItemDefaults.colors(selectedIconColor = green, selectedTextColor = green, indicatorColor = Color(0xFFDDF3ED), unselectedTextColor = Color(0xFF637781) )\n                    )\n                }
             }
         } else {
             Spacer(Modifier.height(8.dp))
