@@ -185,7 +185,8 @@ internal fun MESHXChatHomeScreen(
                             indicatorColor = Color(0xFFDDF3ED),
                             unselectedTextColor = Color(0xFF637781)
                         )
-                    )n                    )\n                }
+                    )
+                    )\n                }
             }
         } else {
             Spacer(Modifier.height(8.dp))
