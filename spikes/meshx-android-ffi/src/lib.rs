@@ -11,6 +11,7 @@ use std::{
 
 mod mls_snapshot;
 mod mls_group;
+mod recovery_identity;
 
 use futures::StreamExt;
 use jni::{objects::{JByteArray, JObject, JString}, sys::{jboolean, jbyteArray, jstring, JNI_FALSE, JNI_TRUE}, JNIEnv};
@@ -1373,6 +1374,64 @@ pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeMlsDecryptApplicatio
             .map(|array| array.into_raw()).unwrap_or(std::ptr::null_mut()),
         Err(error) => {
             set_status(format!("MESHX MLS decryption error: {error}"));
+            std::ptr::null_mut()
+        }
+    }
+}
+
+
+/// Derives a deterministic libp2p Ed25519 private identity from a BIP-39 seed.
+#[no_mangle]
+pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeDeriveRecoveryTransportIdentity(
+    mut env: JNIEnv,
+    _this: JObject,
+    seed: JByteArray,
+) -> jbyteArray {
+    match env.convert_byte_array(&seed)
+        .map_err(|error| format!("Recovery seed could not be read: {error}"))
+        .and_then(|bytes| recovery_identity::derive_transport_identity(&bytes)) {
+        Ok(bytes) => env.byte_array_from_slice(&bytes)
+            .map(|array| array.into_raw()).unwrap_or(std::ptr::null_mut()),
+        Err(error) => {
+            set_status(format!("MESHX recovery transport derivation error: {error}"));
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Derives a deterministic P-256 identity signing private key (PKCS#8 DER).
+#[no_mangle]
+pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeDeriveRecoverySigningPrivateKey(
+    mut env: JNIEnv,
+    _this: JObject,
+    seed: JByteArray,
+) -> jbyteArray {
+    match env.convert_byte_array(&seed)
+        .map_err(|error| format!("Recovery seed could not be read: {error}"))
+        .and_then(|bytes| recovery_identity::derive_signing_private_key(&bytes)) {
+        Ok(bytes) => env.byte_array_from_slice(&bytes)
+            .map(|array| array.into_raw()).unwrap_or(std::ptr::null_mut()),
+        Err(error) => {
+            set_status(format!("MESHX recovery signing-key derivation error: {error}"));
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Derives the X.509 public key matching nativeDeriveRecoverySigningPrivateKey.
+#[no_mangle]
+pub extern "system" fn Java_org_meshx_app_NativeMeshx_nativeDeriveRecoverySigningPublicKey(
+    mut env: JNIEnv,
+    _this: JObject,
+    seed: JByteArray,
+) -> jbyteArray {
+    match env.convert_byte_array(&seed)
+        .map_err(|error| format!("Recovery seed could not be read: {error}"))
+        .and_then(|bytes| recovery_identity::derive_signing_public_key(&bytes)) {
+        Ok(bytes) => env.byte_array_from_slice(&bytes)
+            .map(|array| array.into_raw()).unwrap_or(std::ptr::null_mut()),
+        Err(error) => {
+            set_status(format!("MESHX recovery public-key derivation error: {error}"));
             std::ptr::null_mut()
         }
     }

@@ -26,6 +26,8 @@ import com.google.zxing.MultiFormatReader
 import com.google.zxing.RGBLuminanceSource
 import com.google.zxing.common.HybridBinarizer
 import com.google.zxing.qrcode.QRCodeWriter
+import java.io.ByteArrayOutputStream
+import java.io.DataOutputStream
 import java.security.KeyFactory
 import java.security.KeyPairGenerator
 import java.security.KeyStore
@@ -34,6 +36,7 @@ import java.security.PrivateKey
 import java.security.Signature
 import org.json.JSONObject
 import java.security.spec.ECGenParameterSpec
+import java.security.spec.PKCS8EncodedKeySpec
 import java.security.spec.X509EncodedKeySpec
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -42,6 +45,10 @@ import javax.crypto.spec.GCMParameterSpec
 import kotlinx.coroutines.delay
 
 private const val IDENTITY_ALIAS = "meshx_identity_v1"
+
+private object RecoveryIdentityVaultHolder {
+    @Volatile var current: RecoveryIdentityVault? = null
+}
 private const val PREFS_NAME = "meshx_local_contacts"
 
 private const val MESSAGE_KEY_ALIAS = "meshx_local_messages_aes_v1"
@@ -84,6 +91,10 @@ private fun decryptTransportIdentity(value: String): ByteArray {
 }
 
 private fun loadOrCreateTransportIdentity(prefs: android.content.SharedPreferences): ByteArray {
+    // Recovery-backed accounts always derive the transport identity from the mnemonic.
+    RecoveryIdentityVaultHolder.current?.load()?.let { material ->
+        return material.transportPrivateKey
+    }
     val saved = prefs.getString(TRANSPORT_IDENTITY_PREF, null)
     if (saved != null) {
         return try {
@@ -213,7 +224,8 @@ internal data class MeshxIdentity(
 internal data class ParsedPublicIdentity(
     val fingerprint: String,
     val transportPeerId: String?,
-    val authenticatedBinding: Boolean
+    val authenticatedBinding: Boolean,
+    val identityPublicKey: ByteArray? = null
 )
 
 internal enum class ContactImportDecision { ADD, SAME_IDENTITY, UPGRADE_LEGACY, TRANSPORT_KEY_CHANGED, SIGNED_BINDING_DOWNGRADE }
@@ -249,7 +261,7 @@ internal fun parsePublicIdentity(raw: String): ParsedPublicIdentity {
     if (raw.startsWith("MESHX1:")) {
         val keyBytes = Base64.decode(raw.removePrefix("MESHX1:"), Base64.DEFAULT)
         KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(keyBytes))
-        return ParsedPublicIdentity(fingerprint(keyBytes), null, false)
+        return ParsedPublicIdentity(fingerprint(keyBytes), null, false, keyBytes)
     }
 
     val payloadBytes = Base64.decode(raw.removePrefix("MESHX2:"), Base64.DEFAULT)
@@ -271,23 +283,38 @@ internal fun parsePublicIdentity(raw: String): ParsedPublicIdentity {
     require(actualPeerId == expectedPeerId) {
         "MESHX2 transport Peer ID does not match its public key."
     }
-    return ParsedPublicIdentity(fingerprint(identityPublicKey), actualPeerId, true)
+    return ParsedPublicIdentity(fingerprint(identityPublicKey), actualPeerId, true, identityPublicKey)
 }
 
 internal fun loadOrCreateIdentity(prefs: android.content.SharedPreferences): MeshxIdentity {
-    val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-    if (!keyStore.containsAlias(IDENTITY_ALIAS)) {
+    val recovery = RecoveryIdentityVaultHolder.current?.load()
+    val identityPublicKey: ByteArray
+    val identityPrivateKey: PrivateKey
+    if (recovery != null) {
+        identityPublicKey = recovery.signingPublicKeySpki.copyOf()
+        identityPrivateKey = try {
+            KeyFactory.getInstance("EC")
+                .generatePrivate(PKCS8EncodedKeySpec(recovery.signingPrivateKeyPkcs8))
+        } finally {
+            recovery.signingPrivateKeyPkcs8.fill(0)
+            recovery.transportPrivateKey.fill(0)
+            recovery.signingPublicKeySpki.fill(0)
+        }
+    } else {
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        if (!keyStore.containsAlias(IDENTITY_ALIAS)) {
         val generator = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore")
         generator.initialize(KeyGenParameterSpec.Builder(
             IDENTITY_ALIAS,
             KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY
         ).setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
             .setDigests(KeyProperties.DIGEST_SHA256).build())
-        generator.generateKeyPair()
+            generator.generateKeyPair()
+        }
+        identityPublicKey = keyStore.getCertificate(IDENTITY_ALIAS).publicKey.encoded
+        identityPrivateKey = keyStore.getKey(IDENTITY_ALIAS, null) as? PrivateKey
+            ?: throw IllegalStateException("MESHX identity signing key is unavailable in Android Keystore.")
     }
-    val identityPublicKey = keyStore.getCertificate(IDENTITY_ALIAS).publicKey.encoded
-    val identityPrivateKey = keyStore.getKey(IDENTITY_ALIAS, null) as? PrivateKey
-        ?: throw IllegalStateException("MESHX identity signing key is unavailable in Android Keystore.")
     val transportIdentity = loadOrCreateTransportIdentity(prefs)
     val transportPublicKey = NativeMeshx.transportPublicKey(transportIdentity)
     val transportPeerId = NativeMeshx.transportPeerId(transportPublicKey)
@@ -309,6 +336,242 @@ internal fun loadOrCreateIdentity(prefs: android.content.SharedPreferences): Mes
     )
 }
 
+
+private const val MLS_KEY_PACKAGE_ENVELOPE_PREFIX = "MESHXK1:"
+private const val MLS_INVITATION_ENVELOPE_PREFIX = "MESHXI1:"
+private const val MLS_KEY_PACKAGE_DOMAIN = "MESHX-MLS-KEYPACKAGE-V1"
+private const val MLS_INVITATION_DOMAIN = "MESHX-MLS-INVITATION-V1"
+private const val MAX_MLS_ENVELOPE_PART_BYTES = 1024 * 1024
+
+internal fun loadIdentitySigningPrivateKey(): PrivateKey {
+    val recovery = RecoveryIdentityVaultHolder.current?.load()
+    if (recovery != null) {
+        return try {
+            KeyFactory.getInstance("EC")
+                .generatePrivate(PKCS8EncodedKeySpec(recovery.signingPrivateKeyPkcs8))
+        } finally {
+            recovery.signingPrivateKeyPkcs8.fill(0)
+            recovery.transportPrivateKey.fill(0)
+            recovery.signingPublicKeySpki.fill(0)
+        }
+    }
+    val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+    return keyStore.getKey(IDENTITY_ALIAS, null) as? PrivateKey
+        ?: throw IllegalStateException("MESHX identity signing key is unavailable in Android Keystore.")
+}
+
+private fun meshxIdentityPublicKey(identityPayload: String): java.security.PublicKey {
+    require(identityPayload.length <= 16_384) { "MESHX identity payload is too large." }
+    val parsed = parsePublicIdentity(identityPayload)
+    require(parsed.authenticatedBinding) { "MLS exchange requires a signed MESHX2 identity." }
+    val payloadBytes = Base64.decode(identityPayload.removePrefix("MESHX2:"), Base64.DEFAULT)
+    val payload = JSONObject(String(payloadBytes, Charsets.UTF_8))
+    val encoded = Base64.decode(payload.getString("identity_public_key"), Base64.DEFAULT)
+    return KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(encoded))
+}
+
+private fun mlsEnvelopeSignatureInput(
+    domain: String,
+    identityPublicKey: ByteArray,
+    parts: List<ByteArray>
+): ByteArray {
+    val output = ByteArrayOutputStream()
+    DataOutputStream(output).use { data ->
+        fun writeField(value: ByteArray) {
+            data.writeInt(value.size)
+            data.write(value)
+        }
+        writeField(domain.toByteArray(Charsets.UTF_8))
+        writeField(identityPublicKey)
+        parts.forEach { writeField(it) }
+    }
+    return output.toByteArray()
+}
+
+private fun signMlsEnvelope(
+    identityPayload: String,
+    domain: String,
+    parts: List<ByteArray>,
+    signingKey: PrivateKey
+): ByteArray {
+    val publicKey = meshxIdentityPublicKey(identityPayload)
+    val signer = Signature.getInstance("SHA256withECDSA")
+    signer.initSign(signingKey)
+    val signedBytes = mlsEnvelopeSignatureInput(domain, publicKey.encoded, parts)
+    signer.update(signedBytes)
+    val signatureBytes = signer.sign()
+    val verifier = Signature.getInstance("SHA256withECDSA")
+    verifier.initVerify(publicKey)
+    verifier.update(signedBytes)
+    require(verifier.verify(signatureBytes)) {
+        "MESHX identity signing key does not match the supplied signed identity."
+    }
+    return signatureBytes
+}
+
+private fun verifyMlsEnvelopeSignature(
+    identityPayload: String,
+    expectedIdentity: ParsedPublicIdentity,
+    domain: String,
+    parts: List<ByteArray>,
+    encodedSignature: String
+) {
+    require(expectedIdentity.authenticatedBinding && expectedIdentity.transportPeerId != null) {
+        "MLS exchange requires a saved, signed MESHX2 contact."
+    }
+    val incomingIdentity = parsePublicIdentity(identityPayload)
+    require(incomingIdentity.authenticatedBinding &&
+        incomingIdentity.fingerprint == expectedIdentity.fingerprint &&
+        incomingIdentity.transportPeerId == expectedIdentity.transportPeerId &&
+        expectedIdentity.identityPublicKey?.contentEquals(incomingIdentity.identityPublicKey ?: byteArrayOf()) == true
+    ) {
+        "MLS envelope identity does not match this saved contact and transport key."
+    }
+    val publicKey = meshxIdentityPublicKey(identityPayload)
+    val signatureBytes = Base64.decode(encodedSignature, Base64.DEFAULT)
+    require(signatureBytes.isNotEmpty() && signatureBytes.size <= 256) {
+        "MLS identity signature has an invalid size."
+    }
+    val verifier = Signature.getInstance("SHA256withECDSA")
+    verifier.initVerify(publicKey)
+    verifier.update(mlsEnvelopeSignatureInput(domain, publicKey.encoded, parts))
+    require(verifier.verify(signatureBytes)) {
+        "MLS envelope signature is invalid. Do not accept this invitation."
+    }
+}
+
+internal fun findSignedMlsContactIdentity(
+    contactPayloads: Set<String>,
+    expectedFingerprint: String
+): ParsedPublicIdentity {
+    val matching = contactPayloads.mapNotNull { raw ->
+        try {
+            parsePublicIdentity(raw).takeIf { it.fingerprint == expectedFingerprint }
+        } catch (_: Exception) {
+            null
+        }
+    }
+    return matching.firstOrNull { it.authenticatedBinding && it.transportPeerId != null }
+        ?: throw IllegalArgumentException(
+            "MLS exchange ke liye saved signed MESHX2 contact zaroori hai. MESHX1 legacy contact supported nahi."
+        )
+}
+
+internal fun createSignedMlsKeyPackageEnvelope(
+    identityPayload: String,
+    keyPackage: ByteArray,
+    signingKey: PrivateKey
+): String {
+    require(keyPackage.isNotEmpty() && keyPackage.size <= MAX_MLS_ENVELOPE_PART_BYTES) {
+        "MLS KeyPackage must be between 1 byte and 1 MiB."
+    }
+    val signature = signMlsEnvelope(
+        identityPayload, MLS_KEY_PACKAGE_DOMAIN, listOf(keyPackage), signingKey
+    )
+    val json = JSONObject()
+        .put("version", 1)
+        .put("identity", identityPayload)
+        .put("key_package", Base64.encodeToString(keyPackage, Base64.NO_WRAP))
+        .put("signature", Base64.encodeToString(signature, Base64.NO_WRAP))
+    return MLS_KEY_PACKAGE_ENVELOPE_PREFIX +
+        Base64.encodeToString(json.toString().toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+}
+
+internal fun verifySignedMlsKeyPackageEnvelope(
+    raw: String,
+    expectedIdentity: ParsedPublicIdentity
+): ByteArray {
+    require(raw.startsWith(MLS_KEY_PACKAGE_ENVELOPE_PREFIX) && raw.length <= 2_000_000) {
+        "Signed MESHX MLS KeyPackage envelope required."
+    }
+    val payload = Base64.decode(raw.removePrefix(MLS_KEY_PACKAGE_ENVELOPE_PREFIX), Base64.DEFAULT)
+    require(payload.size <= 1_500_000) { "MLS KeyPackage envelope is too large." }
+    val json = JSONObject(String(payload, Charsets.UTF_8))
+    require(json.getInt("version") == 1) { "Unsupported MLS KeyPackage envelope version." }
+    val identityPayload = json.getString("identity")
+    val keyPackage = Base64.decode(json.getString("key_package"), Base64.DEFAULT)
+    require(keyPackage.isNotEmpty() && keyPackage.size <= MAX_MLS_ENVELOPE_PART_BYTES) {
+        "MLS KeyPackage must be between 1 byte and 1 MiB."
+    }
+    verifyMlsEnvelopeSignature(
+        identityPayload, expectedIdentity, MLS_KEY_PACKAGE_DOMAIN,
+        listOf(keyPackage), json.getString("signature")
+    )
+    return keyPackage
+}
+
+internal fun createSignedMlsInvitationEnvelope(
+    identityPayload: String,
+    invitation: MlsInvitation,
+    signingKey: PrivateKey
+): String {
+    require(invitation.welcomeMessage.isNotEmpty() &&
+        invitation.welcomeMessage.size <= MAX_MLS_ENVELOPE_PART_BYTES &&
+        invitation.ratchetTree.isNotEmpty() &&
+        invitation.ratchetTree.size <= MAX_MLS_ENVELOPE_PART_BYTES
+    ) { "MLS Welcome and ratchet tree must each be between 1 byte and 1 MiB." }
+    val signature = signMlsEnvelope(
+        identityPayload, MLS_INVITATION_DOMAIN,
+        listOf(invitation.welcomeMessage, invitation.ratchetTree), signingKey
+    )
+    val json = JSONObject()
+        .put("version", 1)
+        .put("identity", identityPayload)
+        .put("welcome", Base64.encodeToString(invitation.welcomeMessage, Base64.NO_WRAP))
+        .put("tree", Base64.encodeToString(invitation.ratchetTree, Base64.NO_WRAP))
+        .put("signature", Base64.encodeToString(signature, Base64.NO_WRAP))
+    return MLS_INVITATION_ENVELOPE_PREFIX +
+        Base64.encodeToString(json.toString().toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+}
+
+internal fun verifySignedMlsInvitationEnvelope(
+    raw: String,
+    expectedIdentity: ParsedPublicIdentity
+): MlsInvitation {
+    require(raw.startsWith(MLS_INVITATION_ENVELOPE_PREFIX) && raw.length <= 4_000_000) {
+        "Signed MESHX MLS invitation envelope required."
+    }
+    val payload = Base64.decode(raw.removePrefix(MLS_INVITATION_ENVELOPE_PREFIX), Base64.DEFAULT)
+    require(payload.size <= 3_000_000) { "MLS invitation envelope is too large." }
+    val json = JSONObject(String(payload, Charsets.UTF_8))
+    require(json.getInt("version") == 1) { "Unsupported MLS invitation envelope version." }
+    val identityPayload = json.getString("identity")
+    val welcome = Base64.decode(json.getString("welcome"), Base64.DEFAULT)
+    val tree = Base64.decode(json.getString("tree"), Base64.DEFAULT)
+    require(welcome.isNotEmpty() && welcome.size <= MAX_MLS_ENVELOPE_PART_BYTES &&
+        tree.isNotEmpty() && tree.size <= MAX_MLS_ENVELOPE_PART_BYTES
+    ) { "MLS Welcome or ratchet tree has an invalid size." }
+    verifyMlsEnvelopeSignature(
+        identityPayload, expectedIdentity, MLS_INVITATION_DOMAIN,
+        listOf(welcome, tree), json.getString("signature")
+    )
+    return MlsInvitation(welcome, tree)
+}
+
+private fun pendingMlsSetupPreferenceKey(kind: String, chatId: String): String =
+    "pending_mls_${kind}_${chatId}"
+
+private fun loadPendingMlsSetupEnvelope(
+    prefs: android.content.SharedPreferences,
+    kind: String,
+    chatId: String
+): String {
+    val stored = prefs.getString(pendingMlsSetupPreferenceKey(kind, chatId), null) ?: return ""
+    return decryptLocalRecord(stored)
+}
+
+private fun sendMlsSetupEnvelope(peerId: String, envelope: String): String {
+    val bytes = envelope.toByteArray(Charsets.UTF_8)
+    require(bytes.isNotEmpty() && bytes.size <= 1024 * 1024) {
+        "Signed MLS setup envelope exceeds the 1 MiB transport limit."
+    }
+    return try {
+        NativeMeshx.sendCiphertext(peerId, bytes)
+    } finally {
+        bytes.fill(0)
+    }
+}
+
 private fun makeQrBitmap(payload: String): android.graphics.Bitmap {
     val matrix = QRCodeWriter().encode(payload, BarcodeFormat.QR_CODE, 640, 640)
     val bitmap = android.graphics.Bitmap.createBitmap(640, 640, android.graphics.Bitmap.Config.ARGB_8888)
@@ -322,8 +585,14 @@ private fun makeQrBitmap(payload: String): android.graphics.Bitmap {
 private fun MeshxHome() {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE) }
+    val recoveryVault = remember { RecoveryIdentityVault(context).also { RecoveryIdentityVaultHolder.current = it } }
+    var showRecoverySetup by remember { mutableStateOf(false) }
+    var recoveryEntryMode by remember { mutableStateOf("choose") }
     var nativeTransportStatus by remember { mutableStateOf("Preparing secure MESHX identity…") }
     var nativeTransportReady by remember { mutableStateOf(false) }
+    var internetEnabled by remember { mutableStateOf(prefs.getBoolean("transport_internet_enabled", true)) }
+    var bluetoothEnabled by remember { mutableStateOf(prefs.getBoolean("transport_bluetooth_enabled", false)) }
+    var wifiDirectEnabled by remember { mutableStateOf(prefs.getBoolean("transport_wifi_direct_enabled", false)) }
     var relayAddress by remember { mutableStateOf(prefs.getString("relay_address", "") ?: "") }
     var bootstrapAddresses by remember {
         mutableStateOf(prefs.getString("bootstrap_peers", "") ?: "")
@@ -348,8 +617,8 @@ private fun MeshxHome() {
             nativeTransportReady = false
         }
     }
-    LaunchedEffect(nativeTransportReady) {
-        if (nativeTransportReady) {
+    LaunchedEffect(nativeTransportReady, internetEnabled) {
+        if (nativeTransportReady && internetEnabled) {
             while (true) {
                 delay(1500)
                 nativeTransportStatus = NativeMeshx.status()
@@ -380,9 +649,13 @@ private fun MeshxHome() {
     var status by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var selectedChat by remember { mutableStateOf<String?>(null) }
+    var showAdvancedChatSetup by remember { mutableStateOf(false) }
     var messageDraft by remember { mutableStateOf("") }
     var localMessages by remember { mutableStateOf(loadLocalMessages(prefs)) }
     val latestLocalMessages by rememberUpdatedState(localMessages)
+    val latestContactPublicKeys by rememberUpdatedState(contactPublicKeys)
+    val latestContactTransportPeers by rememberUpdatedState(contactTransportPeers)
+    val latestVerifiedContacts by rememberUpdatedState(verifiedContacts)
     val mlsRepository = remember { MlsStateRepository(context) }
     var mlsChatStatus by remember { mutableStateOf<String?>(null) }
     var mlsKeyPackageText by remember { mutableStateOf("") }
@@ -393,22 +666,27 @@ private fun MeshxHome() {
     LaunchedEffect(selectedChat) {
         mlsCiphertextText = ""
         mlsIncomingCiphertextText = ""
+        val chatId = selectedChat
+        mlsKeyPackageText = if (chatId == null) "" else
+            runCatching { loadPendingMlsSetupEnvelope(prefs, "key_package", chatId) }.getOrDefault("")
+        mlsInvitationText = if (chatId == null) "" else
+            runCatching { loadPendingMlsSetupEnvelope(prefs, "invitation", chatId) }.getOrDefault("")
     }
 
-    // Poll only the currently open, already-joined contact group. Native polling
-    // leaves messages from other contacts in the receive queue.
-    LaunchedEffect(nativeTransportReady, selectedChat) {
+    // Poll the currently open contact for signed MLS setup envelopes and chat
+    // ciphertext. Ordinary messages stay queued until the MLS group is joined.
+    LaunchedEffect(nativeTransportReady, internetEnabled, selectedChat) {
         val chatId = selectedChat
-        if (nativeTransportReady && chatId != null) {
+        if (nativeTransportReady && internetEnabled && chatId != null) {
             while (true) {
                 delay(1500)
                 try {
                     val currentIdentity = identity ?: loadOrCreateIdentity(prefs).also { identity = it }
-                    val peerId = contactTransportPeers.firstOrNull { it.startsWith("$chatId#") }
+                    val peerId = latestContactTransportPeers.firstOrNull { it.startsWith("$chatId#") }
                         ?.substringAfter("#")
                     val groupRecordId = "meshx-chat-" +
                         listOf(currentIdentity.fingerprint, chatId).sorted().joinToString("-")
-                    if (peerId != null && mlsRepository.restoreAndValidateGroupState(groupRecordId)) {
+                    if (peerId != null) {
                         val rawBatch = NativeMeshx.pollIncomingCiphertexts(peerId)
                         // First persist every received opaque envelope locally (AES-GCM)
                         // so a process restart does not discard messages already read from libp2p.
@@ -441,11 +719,68 @@ private fun MeshxHome() {
                             val byteArray = item.getJSONArray("ciphertext")
                             val encrypted = ByteArray(byteArray.length()) { byteArray.getInt(it).toByte() }
                             try {
+                                val setupText = String(encrypted, Charsets.UTF_8)
+                                if (setupText.startsWith("MESHXK1:") || setupText.startsWith("MESHXI1:")) {
+                                    require(chatId in latestVerifiedContacts) {
+                                        "Contact fingerprint verify karein; signed MLS setup abhi accept nahi kiya gaya."
+                                    }
+                                    val expectedContact = findSignedMlsContactIdentity(latestContactPublicKeys, chatId)
+                                    if (setupText.startsWith("MESHXK1:")) {
+                                        val publicPackage = verifySignedMlsKeyPackageEnvelope(setupText, expectedContact)
+                                        publicPackage.fill(0)
+                                        val storageKey = pendingMlsSetupPreferenceKey("key_package", chatId)
+                                        val existingStored = prefs.getString(storageKey, null)
+                                        val existing = existingStored?.let { decryptLocalRecord(it) }
+                                        require(existing == null || existing == setupText) {
+                                            "Ek signed KeyPackage pehle se pending hai. Pehle usko resolve karein."
+                                        }
+                                        val updatedProcessedIds = processedIncomingIds + messageId
+                                        check(prefs.edit()
+                                            .putString(storageKey, encryptLocalRecord(setupText))
+                                            .putStringSet("processed_incoming_ids", updatedProcessedIds.map { encryptLocalRecord(it) }.toSet())
+                                            .commit()) { "Signed KeyPackage device par securely save nahi hua." }
+                                        processedIncomingIds.add(messageId)
+                                        mlsKeyPackageText = setupText
+                                        mlsChatStatus = "Signed KeyPackage Internet se receive aur verify ho gaya. Ab invitation banayein."
+                                    } else {
+                                        val invitation = verifySignedMlsInvitationEnvelope(setupText, expectedContact)
+                                        try {
+                                            val storageKey = pendingMlsSetupPreferenceKey("invitation", chatId)
+                                            val existingStored = prefs.getString(storageKey, null)
+                                            val existing = existingStored?.let { decryptLocalRecord(it) }
+                                            require(existing == null || existing == setupText) {
+                                                "Ek signed invitation pehle se pending hai. Pehle usko resolve karein."
+                                            }
+                                            val updatedProcessedIds = processedIncomingIds + messageId
+                                            check(prefs.edit()
+                                                .putString(storageKey, encryptLocalRecord(setupText))
+                                                .putStringSet("processed_incoming_ids", updatedProcessedIds.map { encryptLocalRecord(it) }.toSet())
+                                                .commit()) { "Signed invitation device par securely save nahi hui." }
+                                            processedIncomingIds.add(messageId)
+                                            mlsInvitationText = setupText
+                                            mlsChatStatus = "Signed Welcome invitation Internet se receive aur verify ho gayi. Ab join karein."
+                                        } finally {
+                                            invitation.welcomeMessage.fill(0)
+                                            invitation.ratchetTree.fill(0)
+                                        }
+                                    }
+                                    NativeMeshx.ackIncomingCiphertext(messageId)
+                                    pending.remove(messageId)
+                                    check(prefs.edit().putStringSet(
+                                        "pending_incoming_ciphertexts",
+                                        pending.values.map { encryptLocalRecord(it) }.toSet()
+                                    ).commit()) { "Received MLS setup envelope cleanup could not be saved." }
+                                    continue
+                                }
+                                if (!mlsRepository.restoreAndValidateGroupState(groupRecordId)) {
+                                    // Keep ordinary MLS messages queued until this contact's group is joined.
+                                    continue
+                                }
                                 val plaintext = mlsRepository.decryptAndAdvanceGroupState(groupRecordId, encrypted)
                                 try {
                                     val encoded = Base64.encodeToString(plaintext, Base64.NO_WRAP)
                                     val entry = "$chatId#${System.currentTimeMillis()}#$encoded"
-                                    val updated = localMessages + entry
+                                    val updated = latestLocalMessages + entry
                                     val updatedProcessedIds = processedIncomingIds + messageId
                                     check(prefs.edit()
                                         .putStringSet("local_messages", updated.map { encryptLocalRecord(it) }.toSet())
@@ -517,11 +852,28 @@ private fun MeshxHome() {
                 Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                if (identity == null) {
+                    Column(Modifier.fillMaxWidth().padding(top = 72.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Text("MESHX", style = MaterialTheme.typography.displaySmall)
+                        Text("Your private identity. Your control.", style = MaterialTheme.typography.titleMedium)
+                        Text("No phone number. No email. Recover your account with your 24-word phrase.", style = MaterialTheme.typography.bodyMedium)
+                        Button(onClick = { showRecoverySetup = true }, modifier = Modifier.fillMaxWidth()) { Text("Create New Account") }
+                        OutlinedButton(onClick = { showRecoverySetup = true }, modifier = Modifier.fillMaxWidth()) { Text("Import Existing Account") }
+                        Text("Your recovery phrase stays on this device. Never share it with anyone.", style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (showRecoverySetup) {
+                        RecoverySetupDialog(onDismiss = { showRecoverySetup = false }, initialMode = recoveryEntryMode, onRecoverySaved = {
+                            try { identity = loadOrCreateIdentity(prefs); error = null }
+                            catch (e: Exception) { error = e.localizedMessage ?: "Account activation failed." }
+                        })
+                    }
+                    error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                } else {
                 Spacer(Modifier.height(24.dp))
                 Text("MESHX", style = MaterialTheme.typography.headlineLarge)
                 Text("Global private messaging")
-                NearbyBluetoothPanel()
-                NearbyWifiDirectPanel(
+                if (bluetoothEnabled) NearbyBluetoothPanel()
+                if (wifiDirectEnabled) NearbyWifiDirectPanel(
                     activeChatName = selectedChat,
                     outgoingCiphertextBase64 = mlsCiphertextText,
                     onDecryptCiphertext = { chatId, encrypted ->
@@ -554,7 +906,23 @@ private fun MeshxHome() {
                 Text("Android prototype — Internet delivery and end-to-end chat are still in development.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 Spacer(Modifier.height(24.dp))
                 Text("Your digital identity", style = MaterialTheme.typography.titleLarge)
-                Text("No phone number or email required. Your private key stays in Android Keystore on this device.")
+                Text("No phone number or email required. Your private key stays protected on this device.")
+                OutlinedButton(onClick = { showRecoverySetup = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (recoveryVault.exists()) "Restore / replace recovery account" else "Create / restore 24-word recovery account")
+                }
+                if (showRecoverySetup) {
+                    RecoverySetupDialog(
+                        onDismiss = { showRecoverySetup = false },
+                        onRecoverySaved = {
+                            try {
+                                identity = loadOrCreateIdentity(prefs)
+                                error = "Recovery account saved. Restart MESHX so the network transport also uses this recovered identity."
+                            } catch (e: Exception) {
+                                error = e.localizedMessage ?: "Recovery account saved, but identity refresh failed. Restart and check again."
+                            }
+                        }
+                    )
+                }
                 Button(onClick = {
                     try {
                         identity = loadOrCreateIdentity(prefs)
@@ -576,7 +944,30 @@ private fun MeshxHome() {
                                 modifier = Modifier.height(220.dp)
                             )
                             Text("Signed MESHX2 identity. Transport Peer ID: ${current.transportPeerId}")
-                            Text("QR mein sirf public keys aur unka signature hai. Private keys kabhi share nahi hoti.")
+                            Text("QR mein public keys aur unka signature hai. Private keys is phone ke Android Keystore mein rehti hain; kabhi share nahi hoti.")
+                            Spacer(Modifier.height(12.dp))
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("MESHX Public Identity", current.qrPayload))
+                                        android.widget.Toast.makeText(context, "Public identity copied", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                ) { Text("Copy Public Identity") }
+                                Button(
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                            type = "text/plain"
+                                            putExtra(android.content.Intent.EXTRA_SUBJECT, "My MESHX public identity")
+                                            putExtra(android.content.Intent.EXTRA_TEXT, current.qrPayload)
+                                        }
+                                        context.startActivity(android.content.Intent.createChooser(shareIntent, "Share MESHX identity"))
+                                    }
+                                ) { Text("Share Identity") }
+                            }
+                            Text("Dusre phone par is code ko Add a contact mein paste karein, ya QR scan karein.", style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
@@ -650,103 +1041,227 @@ private fun MeshxHome() {
                     }
                 }
 
-                Spacer(Modifier.height(16.dp))
-                Text("Saved contacts (" + contacts.size + ")", style = MaterialTheme.typography.titleMedium)
-                if (contacts.isEmpty()) Text("Abhi koi contact nahi hai.")
-                contacts.forEach { contact ->
-                    Card(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(14.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(contact, style = MaterialTheme.typography.bodySmall)
-                                val boundPeerId = contactTransportPeers.firstOrNull { it.startsWith("$contact#") }?.substringAfter("#")
-                                Text(
-                                    if (boundPeerId != null) "Signed transport binding: ${boundPeerId.take(18)}…" else "Legacy identity — transport key not bound",
-                                    color = if (boundPeerId != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-                                    style = MaterialTheme.typography.labelSmall
-                                )
-                                Text(if (contact in verifiedContacts) "Manually fingerprint-verified" else "Not verified", color = if (contact in verifiedContacts) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
-                                TextButton(onClick = {
-                                    val updated = if (contact in verifiedContacts) verifiedContacts - contact else verifiedContacts + contact
-                                    prefs.edit().putStringSet("verified_contacts", updated).apply()
-                                    verifiedContacts = updated
-                                }) { Text(if (contact in verifiedContacts) "Remove verification" else "I compared fingerprint") }
-                                if (boundPeerId != null) {
-                                    TextButton(
-                                        onClick = {
-                                            val result = NativeMeshx.findPeer(boundPeerId)
-                                            status = result
-                                            error = result.takeIf { it.startsWith("MESHX peer discovery error:") }
-                                        },
-                                        enabled = nativeTransportReady
-                                    ) { Text("Search via DHT") }
+                MESHXChatHomeScreen(
+                    contacts = contacts,
+                    localMessages = localMessages,
+                    selectedChat = selectedChat,
+                    verifiedContacts = verifiedContacts,
+                    contactTransportPeers = contactTransportPeers,
+                    internetEnabled = internetEnabled,
+                    bluetoothEnabled = bluetoothEnabled,
+                    wifiDirectEnabled = wifiDirectEnabled,
+                    onInternetEnabledChange = { enabled ->
+                        internetEnabled = enabled
+                        prefs.edit().putBoolean("transport_internet_enabled", enabled).apply()
+                        if (!enabled) nativeTransportStatus = "Internet transport paused for MESHX chat and inbox polling."
+                    },
+                    onBluetoothEnabledChange = { enabled ->
+                        bluetoothEnabled = enabled
+                        prefs.edit().putBoolean("transport_bluetooth_enabled", enabled).apply()
+                    },
+                    onWifiDirectEnabledChange = { enabled ->
+                        wifiDirectEnabled = enabled
+                        prefs.edit().putBoolean("transport_wifi_direct_enabled", enabled).apply()
+                    },
+                    messageDraft = messageDraft,
+                    onMessageDraftChange = { messageDraft = it },
+                    canSendMessage = selectedChat?.let { chatId ->
+                        val currentIdentity = identity ?: runCatching { loadOrCreateIdentity(prefs) }.getOrNull()
+                        val groupId = currentIdentity?.let {
+                            "meshx-chat-" + listOf(it.fingerprint, chatId).sorted().joinToString("-")
+                        }
+                        chatId in verifiedContacts &&
+                            groupId != null &&
+                            runCatching { mlsRepository.restoreAndValidateGroupState(groupId) }.getOrDefault(false) &&
+                            nativeTransportReady && internetEnabled &&
+                            contactTransportPeers.any { it.startsWith("$chatId#") }
+                    } ?: false,
+                    sendBusy = mlsBusy,
+                    status = mlsChatStatus,
+                    onOpenChat = { contact ->
+                        selectedChat = contact
+                        messageDraft = ""
+                        showAdvancedChatSetup = false
+                    },
+                    onAddPublicIdentity = { raw ->
+                        try {
+                            require(raw.startsWith("MESHX2:")) { "Complete signed MESHX2 public identity paste karein; recovery phrase kabhi nahi." }
+                            val parsed = parsePublicIdentity(raw)
+                            require(identity?.fingerprint != parsed.fingerprint) { "Yeh aapki apni public identity hai." }
+                            when (classifyContactImport(contactPublicKeys, parsed)) {
+                                ContactImportDecision.ADD, ContactImportDecision.UPGRADE_LEGACY -> {
+                                    persistContactIdentity(raw, parsed)
+                                    "Added: " + parsed.fingerprint + ". Fingerprint ko dost se alag trusted channel par verify karein."
                                 }
+                                ContactImportDecision.SAME_IDENTITY -> "Already added: " + parsed.fingerprint
+                                ContactImportDecision.TRANSPORT_KEY_CHANGED -> "SECURITY: Transport key change detected. Existing security confirmation use karein."
+                                ContactImportDecision.SIGNED_BINDING_DOWNGRADE -> "Rejected: signed identity downgrade."
                             }
-                            TextButton(onClick = {
-                                selectedChat = contact
-                                messageDraft = ""
-                            }) { Text("Open chat") }
+                        } catch (e: Exception) {
+                            "Invalid public identity: " + (e.localizedMessage ?: "please check the key")
+                        }
+                    },
+                    onBackToChats = {
+                        selectedChat = null
+                        showAdvancedChatSetup = false
+                    },
+                    onOpenSecureSetup = { showAdvancedChatSetup = true },
+                    onSendMessage = {
+                        val chatId = selectedChat
+                        if (chatId != null && !mlsBusy) {
+                            mlsBusy = true
+                            try {
+                                require(chatId in verifiedContacts) {
+                                    "Pehle contact ka fingerprint trusted channel par verify karein."
+                                }
+                                val currentIdentity = identity ?: loadOrCreateIdentity(prefs).also { identity = it }
+                                val groupId = "meshx-chat-" +
+                                    listOf(currentIdentity.fingerprint, chatId).sorted().joinToString("-")
+                                check(mlsRepository.restoreAndValidateGroupState(groupId)) {
+                                    "Secure MLS group abhi ready nahi hai. Advanced secure setup complete karein."
+                                }
+                                val peerId = contactTransportPeers.firstOrNull { it.startsWith("$chatId#") }
+                                    ?.substringAfter("#")
+                                    ?: throw IllegalStateException("Contact ka signed transport Peer ID missing hai.")
+                                check(internetEnabled) { "Internet transport Settings mein OFF hai." }
+                                check(nativeTransportReady) { "MESHX Internet transport abhi ready nahi hai." }
+                                val plain = messageDraft.trim().toByteArray(Charsets.UTF_8)
+                                check(plain.isNotEmpty()) { "Message khaali hai." }
+                                val encrypted = try {
+                                    mlsRepository.encryptAndAdvanceGroupState(groupId, plain)
+                                } finally {
+                                    plain.fill(0)
+                                }
+                                try {
+                                    mlsCiphertextText = Base64.encodeToString(encrypted, Base64.NO_WRAP)
+                                    val sendResult = NativeMeshx.sendCiphertext(peerId, encrypted)
+                                    check(!sendResult.contains("error:", ignoreCase = true) &&
+                                        !sendResult.contains("rejected", ignoreCase = true)) {
+                                        sendResult
+                                    }
+                                    val sentText = messageDraft.trim()
+                                    val encoded = Base64.encodeToString(sentText.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+                                    val entry = "$chatId#${System.currentTimeMillis()}#$encoded"
+                                    val updated = localMessages + entry
+                                    check(prefs.edit().putStringSet(
+                                        "local_messages",
+                                        updated.map { encryptLocalRecord(it) }.toSet()
+                                    ).commit()) { "Message local encrypted history mein save nahi hua." }
+                                    localMessages = updated
+                                    messageDraft = ""
+                                    mlsCiphertextText = ""
+                                    mlsChatStatus = sendResult
+                                } finally {
+                                    encrypted.fill(0)
+                                }
+                            } catch (e: Exception) {
+                                mlsChatStatus = "Message send nahi hua: ${e.localizedMessage ?: "unknown error"}"
+                            } finally {
+                                mlsBusy = false
+                            }
                         }
                     }
-                }
+                )
 
-                selectedChat?.let { chatId ->
+                if (showAdvancedChatSetup) selectedChat?.let { chatId ->
                     Spacer(Modifier.height(16.dp))
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.fillMaxWidth().padding(16.dp)) {
                             Text("Chat with $chatId", style = MaterialTheme.typography.titleMedium)
-                            Text("MLS ciphertext direct peer ko bheja jata hai. Configured relay connected ho to app encrypted message ko offline mailbox mein bhi save karne ki request bhejti hai aur har 15 second baad pending messages check karti hai. Offline delivery tabhi kaam karegi jab compatible public relay server live ho.", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+                            Text("MLS ciphertext aur signed setup envelopes direct peer ko bheje ja sakte hain. Configured relay connected ho to app mailbox storage ki request karti hai; receiver ka open chat har 1.5 second baad pending inbox check karta hai. Auto setup receive ke liye contact chat open rakhein. Public offline delivery tabhi chalegi jab compatible relay server live aur reachable ho; manual copy/paste fallback bhi available hai.", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
                             val ownIdentity = identity ?: runCatching { loadOrCreateIdentity(prefs).also { identity = it } }.getOrNull()
                             val groupRecordId = ownIdentity?.let { "meshx-chat-" + listOf(it.fingerprint, chatId).sorted().joinToString("-") }
                             val keyPackageRecordId = ownIdentity?.let { "meshx-keypackage-" + it.fingerprint + "-" + chatId }
+                            val chatTransportPeerId = contactTransportPeers.firstOrNull { it.startsWith("$chatId#") }?.substringAfter("#")
                             mlsChatStatus?.let { Text(it, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall) }
-                            Text("1. Recipient: create one-time KeyPackage", style = MaterialTheme.typography.titleSmall)
+                            Text("1. Recipient: create a signed one-time KeyPackage", style = MaterialTheme.typography.titleSmall)
+                            Text("MLS setup ke liye dono taraf signed MESHX2 identity aur independently compared fingerprint zaroori hai.", style = MaterialTheme.typography.bodySmall)
                             Button(enabled = !mlsBusy && ownIdentity != null && keyPackageRecordId != null, onClick = {
                                 mlsBusy = true
                                 try {
+                                    require(chatId in verifiedContacts) { "Pehle contact ka fingerprint trusted channel par compare karke 'I compared fingerprint' dabayein." }
+                                    findSignedMlsContactIdentity(contactPublicKeys, chatId)
                                     val bytes = mlsRepository.createAndSaveKeyPackage(keyPackageRecordId!!, ownIdentity!!.fingerprint.toByteArray(Charsets.UTF_8))
-                                    mlsKeyPackageText = Base64.encodeToString(bytes, Base64.NO_WRAP)
-                                    bytes.fill(0)
-                                    mlsChatStatus = "KeyPackage ready. Is public code ko inviter ko share karein."
+                                    try {
+                                        mlsKeyPackageText = createSignedMlsKeyPackageEnvelope(
+                                            ownIdentity!!.qrPayload, bytes, loadIdentitySigningPrivateKey()
+                                        )
+                                    } finally { bytes.fill(0) }
+                                    mlsChatStatus = "Signed KeyPackage ready. Is MESHXK1 code ko contact ko share karein."
                                 } catch (e: Exception) { mlsChatStatus = "KeyPackage error: ${e.localizedMessage ?: "unknown"}" }
                                 finally { mlsBusy = false }
-                            }) { Text("Create my KeyPackage") }
-                            OutlinedTextField(value = mlsKeyPackageText, onValueChange = { mlsKeyPackageText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Public KeyPackage") }, minLines = 2)
-                            Text("2. Inviter: create group and invitation", style = MaterialTheme.typography.titleSmall)
+                            }) { Text("Create signed KeyPackage") }
+                            OutlinedTextField(value = mlsKeyPackageText, onValueChange = { mlsKeyPackageText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Signed MESHXK1 KeyPackage") }, minLines = 2)
+                            Button(
+                                enabled = !mlsBusy && internetEnabled && nativeTransportReady && chatTransportPeerId != null && mlsKeyPackageText.startsWith("MESHXK1:"),
+                                onClick = {
+                                    mlsBusy = true
+                                    try {
+                                        mlsChatStatus = sendMlsSetupEnvelope(chatTransportPeerId!!, mlsKeyPackageText.trim())
+                                    } catch (e: Exception) {
+                                        mlsChatStatus = "KeyPackage send error: ${e.localizedMessage ?: "unknown"}"
+                                    } finally { mlsBusy = false }
+                                }
+                            ) { Text("Send KeyPackage via Internet") }
+                            Text("2. Inviter: verify KeyPackage and sign Welcome invitation", style = MaterialTheme.typography.titleSmall)
                             Button(enabled = !mlsBusy && ownIdentity != null && groupRecordId != null && mlsKeyPackageText.isNotBlank(), onClick = {
                                 mlsBusy = true
                                 try {
-                                    if (!mlsRepository.restoreAndValidateGroupState(groupRecordId!!)) {
-                                        mlsRepository.createAndSaveGroupState(groupRecordId, ownIdentity!!.fingerprint.toByteArray(Charsets.UTF_8))
-                                    }
-                                    val invite = mlsRepository.addContactToGroup(groupRecordId, Base64.decode(mlsKeyPackageText.trim(), Base64.DEFAULT))
-                                    val bundle = JSONObject().put("version", 1)
-                                        .put("welcome", Base64.encodeToString(invite.welcomeMessage, Base64.NO_WRAP))
-                                        .put("tree", Base64.encodeToString(invite.ratchetTree, Base64.NO_WRAP))
-                                    mlsInvitationText = Base64.encodeToString(bundle.toString().toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
-                                    invite.welcomeMessage.fill(0); invite.ratchetTree.fill(0)
-                                    mlsChatStatus = "Invitation created. Recipient ko code share karein."
+                                    require(chatId in verifiedContacts) { "Pehle contact ka fingerprint trusted channel par compare karein." }
+                                    val expectedContact = findSignedMlsContactIdentity(contactPublicKeys, chatId)
+                                    val publicKeyPackage = verifySignedMlsKeyPackageEnvelope(mlsKeyPackageText.trim(), expectedContact)
+                                    try {
+                                        if (!mlsRepository.restoreAndValidateGroupState(groupRecordId!!)) {
+                                            mlsRepository.createAndSaveGroupState(groupRecordId, ownIdentity!!.fingerprint.toByteArray(Charsets.UTF_8))
+                                        }
+                                        val invite = mlsRepository.addContactToGroup(groupRecordId, publicKeyPackage)
+                                        try {
+                                            mlsInvitationText = createSignedMlsInvitationEnvelope(
+                                                ownIdentity!!.qrPayload, invite, loadIdentitySigningPrivateKey()
+                                            )
+                                        } finally {
+                                            invite.welcomeMessage.fill(0)
+                                            invite.ratchetTree.fill(0)
+                                        }
+                                    } finally { publicKeyPackage.fill(0) }
+                                    prefs.edit().remove(pendingMlsSetupPreferenceKey("key_package", chatId)).commit()
+                                    mlsChatStatus = "Signed Welcome ready. MESHXI1 invitation contact ko share karein."
                                 } catch (e: Exception) { mlsChatStatus = "Invitation error: ${e.localizedMessage ?: "unknown"}" }
                                 finally { mlsBusy = false }
-                            }) { Text("Create encrypted invitation") }
-                            OutlinedTextField(value = mlsInvitationText, onValueChange = { mlsInvitationText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Welcome invitation code") }, minLines = 2)
-                            Text("3. Recipient: paste invitation and join", style = MaterialTheme.typography.titleSmall)
+                            }) { Text("Verify and create signed invitation") }
+                            OutlinedTextField(value = mlsInvitationText, onValueChange = { mlsInvitationText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Signed MESHXI1 Welcome invitation") }, minLines = 2)
+                            Button(
+                                enabled = !mlsBusy && internetEnabled && nativeTransportReady && chatTransportPeerId != null && mlsInvitationText.startsWith("MESHXI1:"),
+                                onClick = {
+                                    mlsBusy = true
+                                    try {
+                                        mlsChatStatus = sendMlsSetupEnvelope(chatTransportPeerId!!, mlsInvitationText.trim())
+                                    } catch (e: Exception) {
+                                        mlsChatStatus = "Invitation send error: ${e.localizedMessage ?: "unknown"}"
+                                    } finally { mlsBusy = false }
+                                }
+                            ) { Text("Send invitation via Internet") }
+                            Text("3. Recipient: verify inviter identity and join", style = MaterialTheme.typography.titleSmall)
                             Button(enabled = !mlsBusy && ownIdentity != null && groupRecordId != null && keyPackageRecordId != null && mlsInvitationText.isNotBlank(), onClick = {
                                 mlsBusy = true
                                 try {
-                                    val bundle = JSONObject(String(Base64.decode(mlsInvitationText.trim(), Base64.DEFAULT), Charsets.UTF_8))
-                                    require(bundle.getInt("version") == 1) { "Unsupported invitation version." }
-                                    val welcome = Base64.decode(bundle.getString("welcome"), Base64.DEFAULT)
-                                    val tree = Base64.decode(bundle.getString("tree"), Base64.DEFAULT)
-                                    try { mlsRepository.joinAndSaveInvitedGroup(keyPackageRecordId!!, groupRecordId!!, welcome, tree) }
-                                    finally { welcome.fill(0); tree.fill(0) }
-                                    mlsChatStatus = "MLS group join successful."
+                                    require(chatId in verifiedContacts) { "Pehle inviter ka fingerprint trusted channel par compare karein." }
+                                    val expectedContact = findSignedMlsContactIdentity(contactPublicKeys, chatId)
+                                    val invitation = verifySignedMlsInvitationEnvelope(mlsInvitationText.trim(), expectedContact)
+                                    try {
+                                        mlsRepository.joinAndSaveInvitedGroup(
+                                            keyPackageRecordId!!, groupRecordId!!,
+                                            invitation.welcomeMessage, invitation.ratchetTree
+                                        )
+                                    } finally {
+                                        invitation.welcomeMessage.fill(0)
+                                        invitation.ratchetTree.fill(0)
+                                    }
+                                    prefs.edit().remove(pendingMlsSetupPreferenceKey("invitation", chatId)).commit()
+                                    mlsChatStatus = "Signed MLS invitation verified; group join successful."
                                 } catch (e: Exception) { mlsChatStatus = "Group join error: ${e.localizedMessage ?: "unknown"}" }
                                 finally { mlsBusy = false }
-                            }) { Text("Join encrypted chat") }
+                            }) { Text("Verify and join encrypted chat") }
                             Divider()
                             Text("4. Encrypt and exchange messages", style = MaterialTheme.typography.titleSmall)
                             OutlinedTextField(value = messageDraft, onValueChange = { messageDraft = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Message to encrypt") }, minLines = 2)
@@ -761,9 +1276,8 @@ private fun MeshxHome() {
                                 finally { mlsBusy = false }
                             }) { Text("Encrypt message") }
                             OutlinedTextField(value = mlsCiphertextText, onValueChange = { mlsCiphertextText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Encrypted ciphertext (retry / manual fallback)") }, minLines = 2)
-                            val chatTransportPeerId = contactTransportPeers.firstOrNull { it.startsWith("$chatId#") }?.substringAfter("#")
                             Button(
-                                enabled = !mlsBusy && nativeTransportReady && chatTransportPeerId != null && mlsCiphertextText.isNotBlank(),
+                                enabled = !mlsBusy && internetEnabled && nativeTransportReady && chatTransportPeerId != null && mlsCiphertextText.isNotBlank(),
                                 onClick = {
                                     mlsBusy = true
                                     try {
@@ -808,7 +1322,8 @@ private fun MeshxHome() {
                                     Text(body, Modifier.padding(10.dp))
                                 }
                             }
-                            TextButton(onClick = { selectedChat = null }) { Text("Close") }
+                            TextButton(onClick = { showAdvancedChatSetup = false }) { Text("Back to chat") }
+                            TextButton(onClick = { selectedChat = null; showAdvancedChatSetup = false }) { Text("Close chat") }
                         }
                     }
                 }
@@ -866,6 +1381,7 @@ private fun MeshxHome() {
                 Text("Chat screen MLS ciphertext ko saved contact ke signed Peer ID par bhejti hai. Configured relay par offline mailbox store/fetch/ack protocol bhi connect hai. Public server deployment, background delivery, media transfer aur Bluetooth / Wi-Fi abhi complete ya verify nahi hue hain.")
                 Spacer(Modifier.height(12.dp))
                 Text("Send request queue hona delivery/read receipt nahi hai. Message ciphertext retry field mein rehta hai; incoming messages sirf matching contact ke joined MLS group mein decrypt hote hain. Recovery phrase aur encrypted backup abhi baaki hain.", style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
     }
