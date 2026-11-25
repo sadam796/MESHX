@@ -186,7 +186,8 @@ internal fun MESHXChatHomeScreen(
                             unselectedTextColor = Color(0xFF637781)
                         )
                     )
-                    )\n                }
+                    )
+                }
             }
         } else {
             Spacer(Modifier.height(8.dp))
